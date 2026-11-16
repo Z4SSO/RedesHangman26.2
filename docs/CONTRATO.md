@@ -67,6 +67,7 @@ socket ──► PeerConnection ──(HELLO, PING/PONG, BYE tratados aqui)─�
 ```python
 class PeerConnection:
     peer_id: str            # do outro lado, conhecido após o HELLO
+    features: list[str]     # anunciadas no HELLO/HELLO_OK do outro lado (o roteador confere "hangman")
     direction: str          # "inbound" | "outbound"
     state: PeerState
     rtt_ms: float | None    # média móvel dos últimos 10 PING/PONG
@@ -75,7 +76,10 @@ class PeerConnection:
     async def close(self, reason: str = "shutdown")  # BYE, espera BYE_OK ≤ 2 s, fecha
 ```
 
-`PeerServer(cfg, on_message, on_closed)` com `start()`, `stop()` e `connect(ip, port)`.
+`PeerServer(cfg, on_message, on_closed)` com `start()`, `stop()` e `connect(ip, port) -> PeerConnection | None`.
+
+- Até o `HELLO_OK` (ou, para quem aceita, até o `HELLO`), **nenhuma outra mensagem é aceita**: A descarta e não sobe nada ao roteador. `on_message` só é chamado com a conexão já identificada (`peer_id` e `features` preenchidos).
+- `connect()` devolve `None` se a conexão falhar **ou** se perder o desempate de duplicada (seção 6, item 1); nesse caso quem chamou não faz nada, porque já existe uma conexão válida para aquele vizinho.
 
 ### 5.2 `PeerTable` (A)
 
@@ -128,7 +132,13 @@ Tabela de despacho (quem trata cada tipo):
 | `GUESS_RESULT` | host | `GamePlayer.on_guess_result` |
 | `GAME_OVER` | host | `GamePlayer.on_game_over` |
 
-Peer que não anunciou `"hangman"` no HELLO: o roteador não entrega nem aceita mensagens de lobby/partida dele.
+Peer que não anunciou `"hangman"` no HELLO (`conn.features`): o roteador não entrega nem aceita mensagens de lobby/partida dele.
+
+**Quem responde `ERROR`:**
+
+- Envelope inválido (`unknown_type`, `bad_request`, `not_for_me`, `bad_json`): o **roteador** (C). `ttl != 1` é descartado em silêncio. `ProtocolError.silent` indica isso.
+- Mensagem válida em contexto errado (`invalid_state`, ex.: `GUESS` sem partida, `GAME_START` de quem não é o host do jogador): o **handler de B**, montando com `protocol.make_error(msg, ErrorCode.INVALID_STATE, "...", src=cfg.peer_id)` e enviando por `Sender`. O roteador não conhece o estado do jogo.
+- `ERROR` recebido nunca gera resposta.
 
 ### 5.5 `Hangman` (B), lógica pura
 
@@ -190,7 +200,12 @@ Se o professor responder diferente, altere aqui e avise.
 8. **`max_players` padrão:** `cfg.max_players`.
 9. **Reconexão ao Rendezvous** quando `peer_not_registered`: fazer `REGISTER` de novo e repetir o `DISCOVER` uma vez.
 10. **Palpite de palavra** é normalizado como a palavra secreta antes de comparar (`/word BANANA` = `banana`). Se não normalizar para a-z, a jogada é recusada com `invalid_word`.
-11. **Rígido ao enviar, tolerante ao receber.** `validate_envelope` não exige `STATE.last_guess` nem `word`/`winner`/`scores` do `GAME_OVER` (um `ABORTED` de outro cliente pode omiti-los). **Ao enviar**, sempre preencha todos os campos da especificação (`null` quando não se aplica). Quem lê (`GamePlayer`) usa `msg.get(...)`.
+11. **Rígido ao enviar, tolerante ao receber.** `validate_envelope` não exige `STATE.last_guess` nem `word`/`winner`/`scores` do `GAME_OVER` (um `ABORTED` de outro cliente pode omiti-los). **Ao enviar**, sempre preencha todos os campos da especificação (`null` quando não se aplica). Quem lê (`GamePlayer`) usa `msg.get(...)`. `validate_envelope` confere o **tipo** de todo campo presente (`FIELD_TYPES`, ex.: `seq` inteiro, `players` lista de strings, `rejoin` booleano); tipo errado vira `bad_request`. Por isso os handlers de B podem confiar nos tipos dos campos que listam em `REQUIRED_FIELDS`, mas não na presença dos opcionais.
+12. **`LEAVE`/queda do último jogador** de uma partida `RUNNING`: o host termina com `GAME_OVER result:"ABORTED" reason:"no_players"` (só registrado, sem destinatário), vai a `FINISHED` (visível por 60 s, como no item 7) e depois a `IDLE`. Em partida `OPEN`, sair o último jogador **não** encerra: a partida segue aberta, sem jogadores.
+13. **`/cancel` com partida `OPEN`** também envia `GAME_OVER ABORTED reason:"host_shutdown"` (item 2) aos jogadores já inscritos.
+14. **`GAME_START` ou `STATE` de `src` que não é o host do jogador** (ou de `game_id` diferente do atual): o jogador ignora e responde `ERROR invalid_state`. Mensagem de partida de peer sem `"hangman"` é descartada pelo roteador sem resposta.
+15. **`GUESS` de quem não é jogador da partida** (e `GUESS` sem partida `RUNNING`): `GUESS_RESULT accepted:false reason:"game_not_running"` se há partida do host mas não está `RUNNING`; `ERROR invalid_state` se o host não tem partida alguma ou o `src` não está nela.
+16. **Palpite de letra com mais de um caractere ou fora de `a-z`**: `GUESS_RESULT reason:"invalid_letter"`. Letra maiúscula é normalizada para minúscula antes de checar.
 
 ## 7. Logging
 
