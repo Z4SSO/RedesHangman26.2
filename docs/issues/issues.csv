@@ -33,7 +33,7 @@ Ter o repositório criado, protegido e com as issues importadas, e os três inte
 
 ## Critérios de aceite
 
-- [ ] Os três clonaram e `python -m pytest -q` passa (19 testes)
+- [ ] Os três clonaram e `python -m pytest -q` passa
 - [ ] Push direto na `main` é recusado
 - [ ] As issues aparecem no quadro, com responsável e etiquetas
 - [ ] Os nomes da equipe estão no `README.md`
