@@ -8,9 +8,9 @@ Cliente P2P do **Jogo da Forca** para a disciplina de Redes de Computadores (UnB
 
 | Parte | Responsável | Módulos |
 |---|---|---|
-| **A: Rede** | _(nome)_ | `rendezvous_connection`, `peer_connection`, `peer_table`, `keep_alive`, `p2p_client` |
-| **B: Jogo** | _(nome)_ | `hangman`, `game_host`, `game_player` |
-| **C: CLI e integração** | _(nome)_ | `message_router`, `cli`, `main`, logs, testes de cenários |
+| **A: Rede** | _(Luís Felipe de Lima Benvegnú)_ | `rendezvous_connection`, `peer_connection`, `peer_table`, `keep_alive`, `p2p_client` |
+| **B: Jogo** | _(Caio Bonini Sampaio)_ | `hangman`, `game_host`, `game_player` |
+| **C: CLI e integração** | _(Lucas Diógenes)_ | `message_router`, `cli`, `main`, logs, testes de cenários |
 
 ## Como rodar
 
