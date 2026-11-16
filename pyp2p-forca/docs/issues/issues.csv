@@ -1,0 +1,1457 @@
+"Title","Description"
+"[00.1] Criar o repositório e subir o esqueleto","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | fundação |
+| **Prazo** | Dom 15/11 (noite) |
+| **Branch** | `feat/00-1-repositorio` |
+| **Depende de** | nenhuma |
+| **Etiquetas** | `todos` `fundação` `Sprint Backlog` |
+| **Especificação** | Material Disponibilizado |
+
+## Contexto atual
+
+O esqueleto do projeto (README, CLAUDE.md, contrato, módulos vazios, `protocol.py` e `config.py` prontos com testes) já foi gerado. Falta colocá-lo num repositório do grupo e deixar os três com o ambiente funcionando.
+
+## Objetivo
+
+Ter o repositório criado, protegido e com as issues importadas, e os três integrantes com o projeto rodando localmente.
+
+## Dentro do escopo
+
+- [ ] Criar o repositório privado do grupo (GitLab ou GitHub) e adicionar os três integrantes (e o professor, se for exigido)
+- [ ] Subir o esqueleto na `main` e proteger a `main` (merge só por PR/MR, sem push direto)
+- [ ] Criar o quadro com as colunas `Sprint Backlog`, `Doing`, `Review`, `Done` e as etiquetas de `docs/WORKFLOW.md`
+- [ ] Importar `docs/issues/issues.csv` (GitLab: Issues → Import CSV) e atribuir cada issue à parte certa
+- [ ] Preencher os nomes da equipe na tabela do `README.md`
+- [ ] Cada pessoa: clonar, criar o venv, `pip install -r requirements-dev.txt`, rodar `python -m pytest -q`
+- [ ] Cada pessoa: abrir o Claude Code na raiz e confirmar que ele leu o `CLAUDE.md`
+
+## Fora do escopo
+
+- Qualquer código de módulo (as issues 01 a 03 cuidam disso)
+
+## Critérios de aceite
+
+- [ ] Os três clonaram e `python -m pytest -q` passa (19 testes)
+- [ ] Push direto na `main` é recusado
+- [ ] As issues aparecem no quadro, com responsável e etiquetas
+- [ ] Os nomes da equipe estão no `README.md`
+
+## Itens a estudar
+
+- Proteção de branch no GitLab/GitHub: Settings → Repository → Protected branches
+- Importação de issues por CSV no GitLab (colunas `Title` e `Description`)
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/00-1-repositorio.md`. Releia na `docs/especificacao.md` as seções: Material Disponibilizado. Entre em plan mode e proponha o plano para a issue 00.1. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[00.2] Revisar e congelar o contrato entre módulos","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | fundação |
+| **Prazo** | Dom 15/11 (noite) |
+| **Branch** | `feat/00-2-contrato` |
+| **Depende de** | 00.1 |
+| **Etiquetas** | `todos` `fundação` `Sprint Backlog` |
+| **Especificação** | Protocolo Peer–Peer (todas as mensagens); Regras do jogo; Máquina de estados |
+
+## Contexto atual
+
+`docs/CONTRATO.md` e `forca/protocol.py` foram escritos a partir da especificação e definem como A, B e C se encaixam. Um erro aqui se repete nos três módulos, então vale ler com atenção antes de codar.
+
+## Objetivo
+
+Os três concordam com o contrato e o congelam (`contrato-v1`). Depois disso, mudanças só por PR avisando o grupo.
+
+## Dentro do escopo
+
+- [ ] Reunião de 30 min: ler `docs/CONTRATO.md` inteiro, em voz alta, seção por seção
+- [ ] Cada pessoa confere a sua parte: A confere 5.1 a 5.3, B confere 5.5 a 5.7, C confere 5.4 e a seção 7
+- [ ] Conferir `REQUIRED_FIELDS` de `forca/protocol.py` contra as tabelas de campos da especificação, mensagem por mensagem
+- [ ] Revisar as decisões da seção 6 (ver se alguma contradiz a especificação)
+- [ ] Registrar as dúvidas para o professor na seção 9 (a 00.3 envia)
+- [ ] Corrigir o que for preciso por PR e criar a tag `contrato-v1`
+
+## Fora do escopo
+
+- Implementar qualquer módulo
+
+## Critérios de aceite
+
+- [ ] Cada pessoa consegue dizer quais funções dos outros módulos vai chamar e quais vai expor
+- [ ] `REQUIRED_FIELDS` confere com a especificação (revisado por alguém que não escreveu a lista)
+- [ ] Dúvidas abertas estão na seção 9 do contrato
+- [ ] A tag `contrato-v1` existe na `main`
+
+## Itens a estudar
+
+- Por que `GAME_START`, `STATE` e `GAME_OVER` só trafegam host ↔ jogador (estrela da partida)
+- Diferença entre `ERROR` (msg_id novo + `ref_msg_id`) e as respostas `*_OK` (repetem o `msg_id`)
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/00-2-contrato.md`. Releia na `docs/especificacao.md` as seções: Protocolo Peer–Peer (todas as mensagens), Regras do jogo, Máquina de estados. Entre em plan mode e proponha o plano para a issue 00.2. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[00.3] Obter o material do professor e testar o Rendezvous","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | fundação |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/00-3-material-professor` |
+| **Depende de** | nenhuma |
+| **Etiquetas** | `todos` `fundação` `Sprint Backlog` |
+| **Especificação** | Material Disponibilizado; Protocolo Peer–Rendezvous |
+
+## Contexto atual
+
+A especificação cita itens que o repositório do Rendezvous não contém: cliente de referência `pyp2p-forca`, peer-bot `forca-bot`, `words.txt`, `config.json` oficial e roteiro de testes. O item 7 da avaliação (interoperabilidade) depende deles.
+
+## Objetivo
+
+Ter o material (ou a confirmação de que não existe) e confirmar que o servidor Rendezvous público responde.
+
+## Dentro do escopo
+
+- [ ] Pedir ao professor/monitor os cinco itens acima, mais as dúvidas da seção 9 do contrato (uma mensagem só, agrupando tudo)
+- [ ] Confirmar onde o `forca-bot` fica registrado (namespace `FORCA`, segundo a especificação)
+- [ ] Testar o Rendezvous à mão: enviar um `REGISTER` e um `DISCOVER` (ex.: `rc_tester.py` do repositório `mfcaetano/pyp2p-rdv`, ou `nc`)
+- [ ] Anotar as respostas na seção 9 do `docs/CONTRATO.md` e mover decisões para a seção 6
+- [ ] Se o `words.txt` oficial chegar, substituir o da raiz
+
+## Fora do escopo
+
+- Escrever o cliente do Rendezvous (issue 01.1)
+
+## Critérios de aceite
+
+- [ ] Um `REGISTER` seguido de `DISCOVER` retorna `status: OK`, ou o problema está registrado
+- [ ] A seção 9 do contrato tem uma resposta (ou ""sem resposta até Seg 12h"") para cada item
+- [ ] Se não houver cliente de referência, o grupo decide como cumprir o cenário 11 (ex.: testar entre os próprios clientes) e anota
+
+## Itens a estudar
+
+- O Rendezvous aceita **um comando por conexão** e fecha em seguida
+- `DISCOVER`/`UNREGISTER` só funcionam depois de um `REGISTER` do mesmo IP
+- Limite de 50 requisições/min por IP: um `while True` sem pausa bloqueia o IP por 1 min
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/00-3-material-professor.md`. Releia na `docs/especificacao.md` as seções: Material Disponibilizado, Protocolo Peer–Rendezvous. Entre em plan mode e proponha o plano para a issue 00.3. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.1] Cliente do Rendezvous (REGISTER / DISCOVER / UNREGISTER)","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/01-1-rendezvous` |
+| **Depende de** | 00.2 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | Protocolo Peer–Rendezvous |
+
+## Contexto atual
+
+Nenhum peer enxerga outro sem passar pelo Rendezvous. `forca/rendezvous_connection.py` existe só como esqueleto com as assinaturas do contrato.
+
+## Objetivo
+
+Implementar `RendezvousConnection` com os três comandos, abrindo uma conexão TCP nova por comando.
+
+## Dentro do escopo
+
+- [ ] `register()`: envia `REGISTER` com `namespace`, `name`, `port=listen_port`, `ttl=register_ttl`; guarda `public_ip` e registra `[RDV] registered alice@CIC as IP:PORT (ttl=7200)`
+- [ ] `discover(namespace=None)`: devolve a lista de peers **sem o próprio peer** (filtro por `name` + `namespace`)
+- [ ] `unregister()`: envia `UNREGISTER` com `namespace`, `name` e `port`
+- [ ] `RendezvousError(message)` quando `status == ""ERROR""` (inclui o texto do bloqueio por excesso de requisições)
+- [ ] Timeout de conexão e de leitura (ex.: 5 s) e leitura de exatamente uma linha de resposta
+- [ ] Testes com um servidor falso (`asyncio.start_server` em `127.0.0.1`, porta 0) cobrindo: sucesso, `bad_port`, `peer_not_registered`, resposta de bloqueio, timeout e filtro do próprio peer
+
+## Fora do escopo
+
+- Laço periódico de DISCOVER e refresh do TTL (issue 01.7)
+- Conectar nos peers descobertos (issues 01.2 e 01.3)
+
+## Critérios de aceite
+
+- [ ] Contra o servidor falso, os três comandos produzem o JSON da especificação, uma linha terminada em `\n`
+- [ ] `discover()` nunca devolve o próprio peer
+- [ ] `status: ERROR` vira `RendezvousError` com o `message` do servidor
+- [ ] Nenhuma chamada fica pendurada: tudo com timeout
+- [ ] Contra o servidor público (se acessível), `register()` devolve o IP observado
+
+## Itens a estudar
+
+- `asyncio.open_connection` e `asyncio.wait_for` para timeouts
+- Peer atrás de NAT: o `ip` do `REGISTER` é o IP público; conexões de entrada só funcionam com a porta encaminhada (registrar isso no log)
+- Por que a resposta do `DISCOVER` inclui o próprio peer
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-1-rendezvous.md`. Releia na `docs/especificacao.md` as seções: Protocolo Peer–Rendezvous. Entre em plan mode e proponha o plano para a issue 01.1. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.2] PeerTable: estados, eventos e reconciliação","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/01-2-peer-table` |
+| **Depende de** | 00.2 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | Gerenciamento de Conexões e Reconexões |
+
+## Contexto atual
+
+A malha de descoberta precisa saber, a todo momento, quem foi descoberto, quem está conectado e quem caiu. O resto do sistema (host, jogador, CLI) consulta essa tabela e assina seus eventos.
+
+## Objetivo
+
+Implementar `PeerTable` conforme o contrato (seção 5.2), testável sem rede, com conexões falsas.
+
+## Dentro do escopo
+
+- [ ] Entrada por `peer_id` com `ip`, `port`, `state`, `conn`, `attempts`, `next_retry`
+- [ ] `reconcile(discovered)`: peers novos entram `DISCOVERED` e disparam a conexão; peers que sumiram do Rendezvous viram `GONE` e a conexão fecha com `BYE`
+- [ ] `connected()`, `state_of()`, `send_to()` (é o `Sender` do contrato) e `broadcast(msg_factory)`
+- [ ] `subscribe(event, cb)` e emissão de `peer_connected`, `peer_stale`, `peer_gone`
+- [ ] Receber por parâmetro a função que abre conexões (`connect_fn`), para testar sem rede; atualize o contrato 5.2 se mudar o construtor
+- [ ] Testes: peer novo, peer que some, `send_to` de peer ausente (retorna `False`), eventos disparados
+
+## Fora do escopo
+
+- Abrir sockets (01.3) e backoff de reconexão (01.6)
+- Decidir o que host/jogador fazem nos eventos (issues 02.5 e 02.6)
+
+## Critérios de aceite
+
+- [ ] Após um `reconcile`, peers novos ficam `DISCOVERED` e o conector é chamado uma vez por peer
+- [ ] `send_to` de peer não conectado devolve `False` sem lançar exceção
+- [ ] Os três eventos chegam aos assinantes com o `peer_id` correto
+- [ ] Peer ausente do `DISCOVER` vira `GONE` e é desconectado
+
+## Itens a estudar
+
+- Padrão observer/pub-sub simples com lista de callbacks assíncronos
+- `asyncio.gather` com `return_exceptions=True` para o `broadcast` não parar no primeiro erro
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-2-peer-table.md`. Releia na `docs/especificacao.md` as seções: Gerenciamento de Conexões e Reconexões. Entre em plan mode e proponha o plano para a issue 01.2. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.3] PeerServer e PeerConnection: TCP e framing JSON por linha","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/01-3-peer-connection` |
+| **Depende de** | 00.2 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | Transporte e Codificação; Arquitetura da Solução (duas camadas) |
+
+## Contexto atual
+
+Todas as mensagens entre peers (descoberta e partida) usam a mesma conexão TCP, que é aberta pelos dois lados: cada peer escuta e também conecta nos vizinhos.
+
+## Objetivo
+
+Implementar o servidor TCP, o cliente TCP e o framing de uma mensagem JSON por linha, entregando as mensagens ao `on_message`.
+
+## Dentro do escopo
+
+- [ ] `PeerServer.start()/stop()` escutando em `listen_port` e `connect(ip, port)` para conexões de saída
+- [ ] Leitura por linha com limite de 32 KiB; linha acima do limite fecha a conexão
+- [ ] `decode`/`encode` de `forca/protocol.py` em toda leitura/escrita; JSON inválido gera `ERROR bad_json` e fecha a conexão
+- [ ] `PeerConnection.send(msg)` seguro com várias tarefas escrevendo (um `asyncio.Lock`) e que devolve `False` se a conexão caiu
+- [ ] Erro de leitura/escrita fecha a conexão imediatamente e chama `on_closed`
+- [ ] Log `Wire` em DEBUG com o JSON bruto: `-> {...}` enviado e `<- {...}` recebido
+- [ ] Testes com dois `PeerServer` em `127.0.0.1` (porta 0): troca de mensagem, linha gigante, JSON inválido, fechamento do outro lado
+
+## Fora do escopo
+
+- HELLO e desempate de duplicadas (01.4)
+- PING/PONG (01.5)
+- Validação do envelope e despacho por tipo (03.2)
+
+## Critérios de aceite
+
+- [ ] Duas mensagens enviadas em sequência chegam como duas linhas separadas, na ordem
+- [ ] Uma linha com mais de 32768 bytes não derruba o processo
+- [ ] `send()` em conexão fechada devolve `False`, sem exceção
+- [ ] O log DEBUG mostra o JSON bruto de cada mensagem nos dois sentidos
+
+## Itens a estudar
+
+- `asyncio.start_server`, `StreamReader.readline` e o parâmetro `limit`
+- Por que escrever com `writer.write` + `await writer.drain()` sob um lock
+- Detectar fim de conexão: `readline()` devolve `b""""`
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-3-peer-connection.md`. Releia na `docs/especificacao.md` as seções: Transporte e Codificação, Arquitetura da Solução (duas camadas). Entre em plan mode e proponha o plano para a issue 01.3. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.4] HELLO/HELLO_OK, desempate de duplicadas e BYE/BYE_OK","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/01-4-hello-bye-duplicadas` |
+| **Depende de** | 01.3 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | HELLO / HELLO_OK; BYE / BYE_OK; Conexões duplicadas |
+
+## Contexto atual
+
+Todos os peers tentam conectar em todos. É comum dois peers abrirem conexão um para o outro ao mesmo tempo, e o `/conn` precisa mostrar **uma** conexão por vizinho.
+
+## Objetivo
+
+Implementar o handshake, o desempate determinístico e o encerramento controlado.
+
+## Dentro do escopo
+
+- [ ] Quem abre a conexão envia `HELLO` (`peer_id`, `version: ""1.0""`, `features: [""hangman""]`); quem aceita responde `HELLO_OK` com o mesmo `msg_id`
+- [ ] Antes do `HELLO_OK`, qualquer outra mensagem é recusada
+- [ ] Guardar `features` do vizinho em `conn.features`; sem `""hangman""` a conexão existe mas não recebe lobby/partida
+- [ ] Desempate (contrato, seção 6.1): vale a conexão aberta pelo menor `peer_id`; a outra recebe `BYE reason:""duplicate""`
+- [ ] `close(reason)`: envia `BYE`, espera `BYE_OK` por até 2 s e fecha o socket de qualquer forma; quem recebe `BYE` responde `BYE_OK` e fecha
+- [ ] Logs: `[PeerServer] Inbound connected: bob@CIC (features=hangman)` e `[PeerServer] Duplicate connection with carol@CIC — keeping outbound (lower peer_id)`
+- [ ] Teste: dois peers conectam ao mesmo tempo → exatamente uma conexão sobrevive em cada lado
+
+## Fora do escopo
+
+- Reconexão com backoff (01.6)
+
+## Critérios de aceite
+
+- [ ] Após conexões simultâneas, cada peer tem exatamente uma conexão com o outro (a mesma nos dois lados)
+- [ ] `HELLO_OK` repete o `msg_id` do `HELLO`
+- [ ] Peer sem a feature `hangman` é aceito na malha mas marcado como sem jogo
+- [ ] `close()` nunca demora mais que ~2 s, mesmo sem `BYE_OK`
+
+## Itens a estudar
+
+- Comparação lexicográfica de `peer_id` e por que o resultado é igual nos dois lados
+- Condição de corrida: o `HELLO_OK` do desempate pode chegar depois do fechamento
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-4-hello-bye-duplicadas.md`. Releia na `docs/especificacao.md` as seções: HELLO / HELLO_OK, BYE / BYE_OK, Conexões duplicadas. Entre em plan mode e proponha o plano para a issue 01.4. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.5] KeepAlive: PING/PONG, RTT e detecção de STALE","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/01-5-keep-alive` |
+| **Depende de** | 01.4 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | PING / PONG; Transporte e Codificação |
+
+## Contexto atual
+
+Uma conexão TCP pode morrer sem aviso (`kill -9`, cabo desconectado). É o `PING/PONG` que detecta isso, e a detecção dispara a remoção do jogador (host) ou o aborto da partida (jogador).
+
+## Objetivo
+
+Enviar PING periódico nos dois lados, medir RTT e marcar o peer `STALE` após 3 PINGs sem resposta.
+
+## Dentro do escopo
+
+- [ ] `PING` a cada `ping_interval` em cada conexão (`timestamp` ISO com milissegundos); `PONG` repete `msg_id` **e** `timestamp`
+- [ ] RTT = recebimento do `PONG` − envio do `PING` (casado por `msg_id`), com média móvel dos últimos 10
+- [ ] Contador de PINGs sem resposta, zerado quando um `PONG` chega
+- [ ] Após `ping_miss_limit` (3) seguidos: log `[KeepAlive] carol@CIC missed 3 PINGs — marking STALE`, estado `STALE`, fecha a conexão e emite `peer_stale`
+- [ ] Log `[KeepAlive] bob@CIC RTT=41.7 ms (avg 43.2 ms)`
+- [ ] Testes com intervalo curto (ex.: 0,05 s) e com um par que não responde
+
+## Fora do escopo
+
+- Tentar reconectar o peer STALE (01.6)
+
+## Critérios de aceite
+
+- [ ] O RTT medido aparece em `conn.rtt_ms` e no log
+- [ ] Um par que ignora os PINGs é marcado `STALE` após exatamente 3 intervalos sem `PONG`
+- [ ] `peer_stale` é emitido uma única vez por queda
+- [ ] Fechar a conexão cancela a tarefa de PING (sem tarefa vazando)
+
+## Itens a estudar
+
+- `time.monotonic()` para medir intervalos (e não `datetime`)
+- Cancelar tarefas com `task.cancel()` e tratar `CancelledError`
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-5-keep-alive.md`. Releia na `docs/especificacao.md` as seções: PING / PONG, Transporte e Codificação. Entre em plan mode e proponha o plano para a issue 01.5. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.6] Reconexão com backoff exponencial","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/01-6-reconexao-backoff` |
+| **Depende de** | 01.2, 01.5 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | Gerenciamento de Conexões e Reconexões |
+
+## Contexto atual
+
+Peers `STALE` voltam a aparecer (a pessoa reabre o programa, a rede volta). O cliente precisa tentar de novo sem martelar o servidor nem o peer.
+
+## Objetivo
+
+Reconectar peers `STALE` com espera `base_backoff × 2^n`, limitada por `max_backoff`, até `max_reconnect_attempts`.
+
+## Dentro do escopo
+
+- [ ] Agendar a próxima tentativa em `next_retry` na `PeerTable` (sem `sleep` bloqueante)
+- [ ] Espera = `min(base_backoff * 2**n, max_backoff)`; `attempts` volta a zero ao reconectar
+- [ ] Passar de `max_reconnect_attempts` marca o peer `GONE` até ele reaparecer em um `DISCOVER`
+- [ ] Um método que force a reconciliação imediata, para o comando `/reconnect` da CLI chamar
+- [ ] Testes com `base_backoff` pequeno, conferindo a sequência de esperas
+
+## Fora do escopo
+
+- Reconexão **da partida** (o jogador reenviar `JOIN` ao voltar é da issue 02.6)
+
+## Critérios de aceite
+
+- [ ] As esperas seguem 2, 4, 8, 16, 32 s com os valores padrão e nunca passam de `max_backoff`
+- [ ] Depois de `max_reconnect_attempts` falhas o peer vira `GONE`; um novo `DISCOVER` com ele o traz de volta a `DISCOVERED`
+- [ ] Peer que reconecta volta a `CONNECTED` e zera as tentativas
+- [ ] Nenhuma tentativa bloqueia as demais conexões
+
+## Itens a estudar
+
+- Backoff exponencial e por que se adiciona um pouco de jitter
+- `loop.call_later` ou uma tarefa por peer com `asyncio.sleep`
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-6-reconexao-backoff.md`. Releia na `docs/especificacao.md` as seções: Gerenciamento de Conexões e Reconexões. Entre em plan mode e proponha o plano para a issue 01.6. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[01.7] P2PClient: orquestração, tarefas periódicas e encerramento limpo","| | |
+|---|---|
+| **Responsável** | Parte A: Rede |
+| **Área** | rede |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/01-7-p2p-client` |
+| **Depende de** | 01.1, 01.2, 01.5, 03.2 |
+| **Etiquetas** | `parte-A` `rede` `Sprint Backlog` |
+| **Especificação** | Componentes de um peer; Gerenciamento de Conexões e Reconexões; /quit na tabela de comandos |
+
+## Contexto atual
+
+Cada módulo funciona sozinho; falta quem os liga, sobe as tarefas periódicas e garante o encerramento na ordem certa.
+
+## Objetivo
+
+Implementar `P2PClient.start()/stop()` com o ciclo de vida completo do peer, em parceria com a Parte C (ligação dos handlers).
+
+## Dentro do escopo
+
+- [ ] `start()`: `PeerServer.start` → `REGISTER` → tarefas periódicas → ligar `MessageRouter` e eventos da `PeerTable` a `GameHost`/`GamePlayer`
+- [ ] Tarefa de `DISCOVER` a cada `discover_interval` → `PeerTable.reconcile`; trata `peer_not_registered` com novo `REGISTER` e uma repetição (contrato 6.9)
+- [ ] Tarefa de refresh do registro na metade do `register_ttl`
+- [ ] Garantir que nenhum laço fica sem `await asyncio.sleep` (limite de 50 req/min do Rendezvous)
+- [ ] `stop()` na ordem do contrato (seção 8): `GAME_OVER ABORTED`/`LEAVE` → `BYE` a todos → `UNREGISTER` → cancelar tarefas
+- [ ] Tratar `Ctrl+C` e `/quit` pelo mesmo caminho
+
+## Fora do escopo
+
+- Comandos da CLI (issues 03.3 e 03.4)
+
+## Critérios de aceite
+
+- [ ] Três peers locais se registram, se descobrem e `/conn` mostra duas conexões em cada um (cenário 1)
+- [ ] `/quit` executa os passos na ordem do contrato e o processo termina sozinho
+- [ ] Depois do `stop()` não sobra tarefa pendente nem socket aberto
+- [ ] Em uso normal ficam ~3 requisições/min ao Rendezvous por peer
+
+## Itens a estudar
+
+- `asyncio.TaskGroup` (3.11+) ou lista de tasks com cancelamento no `stop()`
+- `loop.add_signal_handler` para o `SIGINT`
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/01-7-p2p-client.md`. Releia na `docs/especificacao.md` as seções: Componentes de um peer, Gerenciamento de Conexões e Reconexões, /quit na tabela de comandos. Entre em plan mode e proponha o plano para a issue 01.7. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[02.1] hangman.py: lógica pura do jogo + testes unitários","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | jogo |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/02-1-hangman` |
+| **Depende de** | 00.2 |
+| **Etiquetas** | `parte-B` `jogo` `Sprint Backlog` |
+| **Especificação** | Regras do jogo; GAME_START (word_hash); STATE; GUESS / GUESS_RESULT |
+
+## Contexto atual
+
+Toda regra do jogo cabe numa classe sem rede, o que permite testá-la a fundo e é o único ponto do trabalho que dá para terminar sem esperar ninguém. `forca/hangman.py` já tem as assinaturas.
+
+## Objetivo
+
+Implementar `normalize_word`, `Hangman` e `GuessOutcome` conforme o contrato (seção 5.5), com testes que cubram as 10 regras do jogo.
+
+## Dentro do escopo
+
+- [ ] `normalize_word`: minúsculas, remove acentos (`unicodedata`), recusa o que não for `a-z` e tamanho fora de 3..20 (`ValueError`)
+- [ ] `Hangman(word, lives)`: `masked`, `wrong_letters` (em ordem), `lives`, `word_length`, `is_won`, `is_lost`
+- [ ] `guess_letter`: certa revela todas as ocorrências; errada custa 1 vida e vai para `wrong_letters`; repetida (certa ou errada) é rejeitada com `letter_already_used`; fora de `a-z`, `invalid_letter`
+- [ ] `guess_word`: certa vence (`revealed` = letras ainda ocultas); errada custa 1 vida e não revela nada; palavra inválida é `invalid_word` (sem custo)
+- [ ] `word_hash` sobre a palavra **normalizada**
+- [ ] `GuessOutcome.revealed` = número de ocorrências reveladas (base da pontuação)
+- [ ] Testes unitários em `tests/test_hangman.py`: acento, palavra curta/longa/com hífen, letra repetida, vitória por letras, vitória por palavra, derrota, `masked` com letra repetida na palavra, hash conhecido (`casa`)
+
+## Fora do escopo
+
+- Turnos, jogadores, `STATE` e qualquer mensagem (issues 02.3 e 02.4)
+
+## Critérios de aceite
+
+- [ ] `normalize_word(""Açaí"")` devolve `""acai""`; `""ab""` e `""co-op""` levantam `ValueError`
+- [ ] Com `banana`, adivinhar `a` dá `masked == ""_a_a_a""` e `revealed == 3`
+- [ ] Letra repetida **não** custa vida
+- [ ] `is_lost` fica `True` exatamente quando `lives == 0`
+- [ ] O módulo não importa `asyncio`, `socket` nem nada de `forca.*` além do que for puro
+- [ ] `python -m pytest tests/test_hangman.py` verde
+
+## Itens a estudar
+
+- `unicodedata.normalize(""NFKD"", ...)` para tirar acentos
+- `hashlib.sha256` e `hexdigest()` (minúsculo por padrão)
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/02-1-hangman.md`. Releia na `docs/especificacao.md` as seções: Regras do jogo, GAME_START (word_hash), STATE, GUESS / GUESS_RESULT. Entre em plan mode e proponha o plano para a issue 02.1. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[02.2] GameHost (1/4): criar partida e lobby (GAME_LIST, JOIN, LEAVE)","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | jogo |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/02-2-host-lobby` |
+| **Depende de** | 02.1 |
+| **Etiquetas** | `parte-B` `jogo` `Sprint Backlog` |
+| **Especificação** | GAME_LIST / GAME_LIST_OK; JOIN / JOIN_OK / JOIN_ERR; LEAVE / LEAVE_OK; Identidade e Escopo |
+
+## Contexto atual
+
+Antes da partida começar, o host anuncia a partida aos vizinhos (`GAME_LIST`), aceita e recusa jogadores (`JOIN`) e deixa jogadores saírem (`LEAVE`).
+
+## Objetivo
+
+Implementar `create`, `describe` e os handlers `on_game_list`, `on_join`, `on_leave` do `GameHost`, testando com um `Sender` falso (sem rede).
+
+## Dentro do escopo
+
+- [ ] `create(word, max_players)`: normaliza a palavra, gera `game_id` (`<host>/<8 hex>`), status `OPEN`; log `[Host] Game alice@CIC/3f9a2c1b created (word_length=6, lives=6)`
+- [ ] `describe()`: o item de `games[]` (`game_id`, `host`, `status`, `players`, `max_players`, `lives`, `word_length`)
+- [ ] `on_game_list`: responde `GAME_LIST_OK` com `games: []` quando não há partida (mesmo `msg_id`)
+- [ ] `on_join`: `JOIN_OK` (com `players` na ordem de entrada e `rejoin: false`) ou `JOIN_ERR` com `unknown_game`, `game_full`, `game_running`, `game_finished`, `already_joined`; log `[Host] bob@CIC joined (2/4)`
+- [ ] `on_leave`: remove o jogador e responde `LEAVE_OK`
+- [ ] O host **não** é jogador; checagem de exclusão mútua (`RuntimeError` se já estiver numa partida)
+- [ ] Testes com `Sender` falso (uma lista) cobrindo cada motivo de `JOIN_ERR`
+
+## Fora do escopo
+
+- `/start` e partida em andamento (02.3 e 02.4)
+- `rejoin` durante `RUNNING` (02.5)
+
+## Critérios de aceite
+
+- [ ] Cada motivo de `JOIN_ERR` da especificação é produzido pelo caso certo
+- [ ] `GAME_LIST_OK` de um peer sem partida tem `games: []`
+- [ ] Resposta sempre repete o `msg_id` da requisição e inverte `src`/`dst`
+- [ ] A mesma pessoa mandar `JOIN` duas vezes resulta em `already_joined`
+
+## Itens a estudar
+
+- `secrets.token_hex(4)` ou `uuid.uuid4().hex[:8]` para o sufixo do `game_id`
+- Injeção de dependência: por que o `GameHost` recebe o `Sender` em vez de importar a rede
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/02-2-host-lobby.md`. Releia na `docs/especificacao.md` as seções: GAME_LIST / GAME_LIST_OK, JOIN / JOIN_OK / JOIN_ERR, LEAVE / LEAVE_OK, Identidade e Escopo. Entre em plan mode e proponha o plano para a issue 02.2. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[02.3] GameHost (2/4): /start, GAME_START e STATE","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | jogo |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/02-3-host-start` |
+| **Depende de** | 02.2 |
+| **Etiquetas** | `parte-B` `jogo` `Sprint Backlog` |
+| **Especificação** | GAME_START; STATE; Regras do jogo (turnos) |
+
+## Contexto atual
+
+Com ao menos um jogador inscrito, o host dispara a partida: manda `GAME_START` a cada jogador e logo em seguida o primeiro `STATE`.
+
+## Objetivo
+
+Implementar `start()` e a difusão de `STATE` com `seq` correto.
+
+## Dentro do escopo
+
+- [ ] `start()`: exige pelo menos 1 jogador (`ValueError` caso contrário); `OPEN` → `RUNNING`
+- [ ] `GAME_START` a cada jogador: `players` (ordem definitiva dos turnos), `lives`, `word_length`, `word_hash` (da palavra normalizada), `turn_timeout`
+- [ ] `STATE seq=1` logo depois, com `turn` = primeiro jogador, `masked` todo `_`, `wrong_letters: []`, `last_guess: null`
+- [ ] Função única de difusão de `STATE` que incrementa o `seq` a cada chamada (1, 2, 3, ...)
+- [ ] Log `[Host] Turn: bob@CIC (timeout 30 s)`
+- [ ] Testes: `start` com 0 jogadores, ordem das mensagens, `seq` crescente, hash correto
+
+## Fora do escopo
+
+- Jogadas e fim de partida (02.4)
+- Timeout de turno (02.5)
+
+## Critérios de aceite
+
+- [ ] `/start` sem jogadores é recusado localmente com mensagem clara
+- [ ] Cada jogador recebe `GAME_START` e depois `STATE seq=1`
+- [ ] O `word_hash` de `casa` é o SHA-256 esperado
+- [ ] O `seq` nunca repete nem pula
+
+## Itens a estudar
+
+- Por que o host manda um `STATE` completo (não um delta): o jogador pode ter perdido mensagens
+- Round-robin com índice e módulo
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/02-3-host-start.md`. Releia na `docs/especificacao.md` as seções: GAME_START, STATE, Regras do jogo (turnos). Entre em plan mode e proponha o plano para a issue 02.3. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[02.4] GameHost (3/4): GUESS, turnos, GAME_OVER e pontuação","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | jogo |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/02-4-host-jogadas` |
+| **Depende de** | 02.3 |
+| **Etiquetas** | `parte-B` `jogo` `Sprint Backlog` |
+| **Especificação** | GUESS / GUESS_RESULT; GAME_OVER; Regras do jogo; Máquina de estados (host) |
+
+## Contexto atual
+
+É o coração do jogo: o host valida cada jogada, passa o turno, atualiza vidas e encerra a partida.
+
+## Objetivo
+
+Implementar `on_guess`, o fim de partida, `cancel`/`shutdown` e a volta a `IDLE`.
+
+## Dentro do escopo
+
+- [ ] `on_guess` valida: partida `RUNNING`, vez de quem jogou, exatamente `letter` ou `word`; rejeição devolve `GUESS_RESULT accepted:false` com `not_your_turn`, `letter_already_used`, `invalid_letter`, `invalid_word` ou `game_not_running`, **sem consumir o turno e sem gerar `STATE`**
+- [ ] Aceita: `GUESS_RESULT accepted:true, correct:<bool>` ao autor e um `STATE` a **todos** os jogadores; o turno passa ao próximo **independente de acerto**
+- [ ] Fim: `WON` quando `masked` não tem `_`; `LOST` quando `lives == 0`; `GAME_OVER` com `word`, `winner` (quem completou; `null` se `LOST`) e `scores` (letras reveladas por jogador; `/word` certo soma as letras que faltavam)
+- [ ] `cancel()`/`shutdown()`: `GAME_OVER ABORTED reason:""host_shutdown""` aos jogadores e volta a `IDLE`
+- [ ] Após o fim, `GAME_LIST_OK` informa `FINISHED` por 60 s e depois a partida some
+- [ ] Logs: `[Host] GUESS bob@CIC letter=n → correct, masked=_ana_a` e `[Host] Game ... finished: WON by bob@CIC`
+- [ ] Testes com `Sender` falso: vitória por letras, vitória por palavra, derrota, fora do turno, letra repetida, `/word` errado custa vida, rejeição não gera `STATE`
+
+## Fora do escopo
+
+- Timeout de turno e quedas de jogador (02.5)
+
+## Critérios de aceite
+
+- [ ] Cenários 2 a 5 da especificação passam contra o `GameHost` com `Sender` falso
+- [ ] Uma jogada rejeitada não altera `seq`, vidas nem turno
+- [ ] `scores` soma corretamente (inclui o `/word` vencedor)
+- [ ] `GAME_OVER LOST` traz `winner: null` e a palavra revelada
+
+## Itens a estudar
+
+- `asyncio.sleep` + tarefa para expirar o `FINISHED` em 60 s sem bloquear
+- Diferença entre `result` (`WON`/`LOST`/`ABORTED`) e `reason` (só no `ABORTED`)
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/02-4-host-jogadas.md`. Releia na `docs/especificacao.md` as seções: GUESS / GUESS_RESULT, GAME_OVER, Regras do jogo, Máquina de estados (host). Entre em plan mode e proponha o plano para a issue 02.4. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[02.5] GameHost (4/4): timeout de turno, queda de jogador e rejoin","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | jogo |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/02-5-host-falhas` |
+| **Depende de** | 02.4, 01.5 |
+| **Etiquetas** | `parte-B` `jogo` `Sprint Backlog` |
+| **Especificação** | Regras do jogo (timeout de turno, jogadores que saem); Tratamento de falhas; JOIN (rejoin) |
+
+## Contexto atual
+
+Jogadores podem ficar parados, sair ou cair (`kill -9`). O host precisa continuar a partida sem travar.
+
+## Objetivo
+
+Implementar o timeout de turno, a remoção de jogador caído e o retorno de jogador (`rejoin`).
+
+## Dentro do escopo
+
+- [ ] Timer de turno de `turn_timeout` s, reiniciado a cada `STATE`; ao estourar, passa o turno e difunde `STATE` com `last_guess: {""player"": ..., ""timeout"": true}`, **sem custar vida**; log `[Host] Turn timeout for carol@CIC — skipping`
+- [ ] `on_peer_stale(peer_id)`: se era jogador, remove, difunde `STATE`; se era a vez dele, passa o turno; log `[Host] Player carol@CIC STALE — removed from game`
+- [ ] Se não restar nenhum jogador: `GAME_OVER ABORTED reason:""no_players""` (só registrado) e volta a `IDLE`
+- [ ] `LEAVE` durante `RUNNING` também difunde novo `STATE`
+- [ ] `JOIN` de quem já era jogador numa partida `RUNNING`: `JOIN_OK rejoin:true` + `STATE` corrente; ele volta ao **fim** do rodízio
+- [ ] Cancelar o timer em todo fim de partida (sem tarefa vazando)
+- [ ] Testes com relógio curto: timeout, queda na vez do jogador, queda do último jogador, rejoin
+
+## Fora do escopo
+
+- Migração de host (bônus 05.1)
+
+## Critérios de aceite
+
+- [ ] Cenários 6, 7 e 8 passam contra o `GameHost` com `Sender` falso
+- [ ] Timeout não custa vida e o `STATE` traz `timeout: true`
+- [ ] Jogador que cai na própria vez não trava a partida
+- [ ] Rejoin devolve o `STATE` atual e o jogador entra no fim do rodízio
+
+## Itens a estudar
+
+- `asyncio.Task` com `cancel()` para reiniciar o timer; evitar dois timers simultâneos
+- Por que o timeout chama a mesma rotina de ""passar turno"" que uma jogada aceita
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/02-5-host-falhas.md`. Releia na `docs/especificacao.md` as seções: Regras do jogo (timeout de turno, jogadores que saem), Tratamento de falhas, JOIN (rejoin). Entre em plan mode e proponha o plano para a issue 02.5. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[02.6] GamePlayer: entrar, jogar, aplicar STATE e reagir à queda do host","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | jogo |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/02-6-game-player` |
+| **Depende de** | 02.1 |
+| **Etiquetas** | `parte-B` `jogo` `Sprint Backlog` |
+| **Especificação** | JOIN / JOIN_OK / JOIN_ERR; STATE; GAME_OVER; Máquina de estados (jogador); Tratamento de falhas |
+
+## Contexto atual
+
+Do outro lado da partida está o jogador: manda `JOIN`, aplica os `STATE` recebidos, envia palpites e confere se o host não trapaceou.
+
+## Objetivo
+
+Implementar `GamePlayer` completo conforme o contrato (seção 5.7), testado com um `Sender` falso.
+
+## Dentro do escopo
+
+- [ ] `join(host_peer_id, game_id)`: envia `JOIN`; `JOIN_OK` → `JOINED`; `JOIN_ERR` → `IDLE` com mensagem ao usuário
+- [ ] `on_game_start` guarda `word_hash`, `lives`, `players`, `turn_timeout`; `on_state` aplica só se `seq` > último (senão descarta e registra `[Player] STATE seq=3 ignored (already at seq=4)` em DEBUG); log `[Player] STATE seq=4 applied: _ana_a lives=5 turn=carol@CIC`
+- [ ] `guess_letter`/`guess_word`: envia `GUESS`; avisa o usuário no `GUESS_RESULT` rejeitado (`not_your_turn`, ...)
+- [ ] `on_game_over`: calcula `sha256(word)` e compara com o `word_hash`; diferente → `WARNING host cheated: hash mismatch`; log `[Player] GAME_OVER WON word=banana winner=bob@CIC — hash OK`; volta a `IDLE`
+- [ ] `on_peer_stale(host)`: `[Game] Host alice@CIC unreachable — game aborted` e volta a `IDLE` (sem tentar virar host)
+- [ ] Ao reconectar a um host que a partida estava `RUNNING`, reenviar `JOIN` (rejoin)
+- [ ] `status_lines()` com o formato mínimo do `/status` (palavra, vidas, erradas, jogadores, vez de quem)
+- [ ] Testes: `seq` repetido/menor descartado, hash divergente, host que cai, `JOIN_ERR`
+
+## Fora do escopo
+
+- Migração de host (bônus 05.1)
+
+## Critérios de aceite
+
+- [ ] `STATE` com `seq` menor ou igual ao último é ignorado sem alterar o estado
+- [ ] Hash adulterado gera `WARNING` e a partida termina normalmente
+- [ ] Queda do host leva a `IDLE` e não deixa estado pendurado
+- [ ] `/status` mostra todos os campos exigidos pela especificação
+
+## Itens a estudar
+
+- Idempotência e ordenação: por que o `seq` existe
+- Como o jogador sabe que é a vez dele (`STATE.turn == meu_peer_id`)
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/02-6-game-player.md`. Releia na `docs/especificacao.md` as seções: JOIN / JOIN_OK / JOIN_ERR, STATE, GAME_OVER, Máquina de estados (jogador), Tratamento de falhas. Entre em plan mode e proponha o plano para a issue 02.6. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[03.1] main.py: argumentos, config.json e logging","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | cli |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/03-1-main-logging` |
+| **Depende de** | 00.2 |
+| **Etiquetas** | `parte-C` `cli` `Sprint Backlog` |
+| **Especificação** | Arquivo de configuração; Observabilidade e Logs |
+
+## Contexto atual
+
+`forca/main.py` e `forca/config.py` já leem o `config.json` e os argumentos. Falta o que a avaliação mais olha por fora: logging correto, com módulo, timestamp e nível, e o JSON bruto em DEBUG.
+
+## Objetivo
+
+Configurar o logging (tela × arquivo) e a inicialização do programa.
+
+## Dentro do escopo
+
+- [ ] Formato único `%(asctime)s %(levelname)-7s [%(name)s] %(message)s` (contrato, seção 7)
+- [ ] Tela: `INFO` ou acima, mais tudo de `CLI` e `Game`; arquivo (`--log-file` / `log_file`): tudo, incluindo `DEBUG` e o logger `Wire` com o JSON bruto
+- [ ] `/log <nível>` troca o nível da tela em tempo de execução (função que a CLI chama)
+- [ ] Criar `P2PClient` e `CLI`, rodar o loop e encerrar limpo em `Ctrl+C`
+- [ ] Erro de configuração (chave desconhecida, porta inválida) vira mensagem clara, não traceback
+- [ ] Testes: `parse_args`, precedência linha de comando > `config.json` > padrão
+
+## Fora do escopo
+
+- Os comandos em si (03.3 e 03.4)
+
+## Critérios de aceite
+
+- [ ] Com `--log-file x.log`, o arquivo recebe `DEBUG` e a tela só `INFO`
+- [ ] Mudar o nível com `/log DEBUG` passa a mostrar `DEBUG` na tela sem reiniciar
+- [ ] `--name`, `--namespace` e `--port` sobrescrevem o `config.json`
+- [ ] `Ctrl+C` encerra pelo mesmo caminho do `/quit`
+
+## Itens a estudar
+
+- `logging.Handler` com níveis diferentes por handler (tela × arquivo)
+- `argparse` e precedência de configuração
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/03-1-main-logging.md`. Releia na `docs/especificacao.md` as seções: Arquivo de configuração, Observabilidade e Logs. Entre em plan mode e proponha o plano para a issue 03.1. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[03.2] MessageRouter: validar o envelope e despachar por tipo","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | cli |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/03-2-message-router` |
+| **Depende de** | 00.2 |
+| **Etiquetas** | `parte-C` `cli` `Sprint Backlog` |
+| **Especificação** | Envelope comum; Regras de processamento; ERROR |
+
+## Contexto atual
+
+Toda mensagem que não é de conexão (HELLO/PING/BYE) passa por aqui. O roteador é a única porta de entrada para `GameHost` e `GamePlayer` e a razão de eles serem testáveis sem rede.
+
+## Objetivo
+
+Implementar `MessageRouter` conforme o contrato (seção 5.4), testado com conexões falsas.
+
+## Dentro do escopo
+
+- [ ] `register(type, handler)` e `on_message(conn, msg)`
+- [ ] `validate_envelope` antes de despachar: `unknown_type`, `bad_request`, `not_for_me` viram `ERROR` ao remetente; `ttl != 1` é descartada em silêncio; a conexão **permanece aberta**
+- [ ] Mensagem de contexto inválido (`GUESS` fora de partida) responde `ERROR invalid_state` (o handler levanta e o roteador traduz)
+- [ ] `ERROR` recebido só é registrado no log e **nunca** gera resposta
+- [ ] Peer sem a feature `hangman` nunca recebe nem entrega mensagens de lobby/partida
+- [ ] `request(peer_id, msg, timeout)`: envia e espera a resposta de mesmo `msg_id`; `None` no timeout; resposta casada não vai aos handlers
+- [ ] Exceção dentro de um handler é registrada e não derruba o roteador
+- [ ] Testes com `FakeConnection`: cada código de erro, `ttl` errado, `request` com e sem resposta, handler que levanta
+
+## Fora do escopo
+
+- Implementar os handlers de jogo (Parte B)
+- HELLO/PING/BYE (Parte A)
+
+## Critérios de aceite
+
+- [ ] Mensagem com `type` desconhecido gera `ERROR unknown_type` e a conexão segue aberta
+- [ ] Mensagem com `dst` de outro peer gera `ERROR not_for_me`
+- [ ] Duas chamadas simultâneas de `request` para peers diferentes não se misturam
+- [ ] Um handler que levanta exceção não impede as mensagens seguintes
+
+## Itens a estudar
+
+- `asyncio.Future` para casar requisição e resposta pelo `msg_id`
+- `asyncio.wait_for` e limpar o dicionário de pendentes em caso de timeout
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/03-2-message-router.md`. Releia na `docs/especificacao.md` as seções: Envelope comum, Regras de processamento, ERROR. Entre em plan mode e proponha o plano para a issue 03.2. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[03.3] CLI (1/2): laço de comandos e comandos de rede","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | cli |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/03-3-cli-rede` |
+| **Depende de** | 03.1, 03.2 |
+| **Etiquetas** | `parte-C` `cli` `Sprint Backlog` |
+| **Especificação** | Interface de Usuário (CLI) |
+
+## Contexto atual
+
+A CLI é como o grupo e o professor vão ver o programa funcionando. A leitura do teclado não pode bloquear as tarefas de rede.
+
+## Objetivo
+
+Implementar o laço da CLI e os comandos `/peers`, `/conn`, `/rtt`, `/reconnect`, `/log`, `/help`, `/quit`.
+
+## Dentro do escopo
+
+- [ ] Leitura de `stdin` sem bloquear o event loop (`asyncio.to_thread(input)` ou leitor assíncrono)
+- [ ] Parser de comandos, argumentos e mensagem de uso para comando inválido; comando desconhecido não derruba o programa
+- [ ] `/peers [* | #namespace]`: `DISCOVER` e lista (padrão: namespace local); respeitar o limite do Rendezvous
+- [ ] `/conn`: conexões ativas (`peer_id`, entrada/saída, estado, RTT) com exatamente uma por vizinho
+- [ ] `/rtt`: RTT médio por peer
+- [ ] `/reconnect`: chama a reconciliação imediata (issue 01.6)
+- [ ] `/log <nível>`, `/help` (lista todos os comandos) e `/quit` (chama `P2PClient.stop()`)
+- [ ] Testes do parser (sem rede)
+
+## Fora do escopo
+
+- Comandos de jogo (03.4)
+
+## Critérios de aceite
+
+- [ ] Todos os comandos desta issue respondem com saída legível
+- [ ] `/help` lista os 17 comandos da especificação
+- [ ] Digitar `/foo` mostra um aviso e o programa segue
+- [ ] Enquanto espera o teclado, o `PING/PONG` continua funcionando
+
+## Itens a estudar
+
+- `asyncio.to_thread` e por que `input()` direto trava o event loop
+- `shlex.split` para argumentos com aspas
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/03-3-cli-rede.md`. Releia na `docs/especificacao.md` as seções: Interface de Usuário (CLI). Entre em plan mode e proponha o plano para a issue 03.3. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[03.4] CLI (2/2): comandos de jogo e /games","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | cli |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/03-4-cli-jogo` |
+| **Depende de** | 03.3, 02.2, 02.6 |
+| **Etiquetas** | `parte-C` `cli` `Sprint Backlog` |
+| **Especificação** | Interface de Usuário (CLI); GAME_LIST / GAME_LIST_OK; Exibição mínima do /status |
+
+## Contexto atual
+
+Os comandos de jogo ligam a CLI ao `GameHost` e ao `GamePlayer` e aplicam a regra de **uma partida por vez**.
+
+## Objetivo
+
+Implementar `/games`, `/create`, `/start`, `/cancel`, `/join`, `/leave`, `/guess`, `/word`, `/status`.
+
+## Dentro do escopo
+
+- [ ] `/games`: `router.request(GAME_LIST)` a **todos** os vizinhos conectados com a feature `hangman`, em paralelo, consolidando as respostas (formato do exemplo da especificação)
+- [ ] `/create <palavra> [max_players]` e `/create --random [max_players]` (sorteia de `words_file`)
+- [ ] `/start`, `/cancel`, `/leave`, `/guess <letra>`, `/word <palavra>`
+- [ ] `/join <host_peer_id>`: usa `/games` internamente para achar o `game_id` aberto desse host; mensagem clara em `JOIN_ERR`
+- [ ] `/status`: delega a `GameHost`/`GamePlayer.status_lines()`
+- [ ] Exclusão mútua: criar ou entrar com partida ativa é recusado com mensagem (contrato 5.8)
+- [ ] Validação local antes de enviar (letra única `a-z`, palavra válida) e saída `[CLI]`/`[Game]` clara
+
+## Fora do escopo
+
+- Regras do jogo e mensagens (Parte B)
+
+## Critérios de aceite
+
+- [ ] `/games` com 3 vizinhos, um deles com partida aberta, lista só essa partida; vizinho que não responde não trava o comando (timeout)
+- [ ] `/create` e `/join` simultâneos no mesmo peer são recusados
+- [ ] `/start` sem jogadores mostra erro local
+- [ ] `/status` mostra palavra, vidas, erradas, jogadores e vez de quem
+
+## Itens a estudar
+
+- `asyncio.gather` para consultar todos os vizinhos em paralelo
+- `random.choice` + leitura de `words.txt` (já normalizado)
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/03-4-cli-jogo.md`. Releia na `docs/especificacao.md` as seções: Interface de Usuário (CLI), GAME_LIST / GAME_LIST_OK, Exibição mínima do /status. Entre em plan mode e proponha o plano para a issue 03.4. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[03.5] Passada final de logs: textos e níveis da especificação","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | cli |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/03-5-logs-spec` |
+| **Depende de** | 01.5, 02.4, 02.6, 03.1 |
+| **Etiquetas** | `parte-C` `cli` `Sprint Backlog` |
+| **Especificação** | Observabilidade e Logs |
+
+## Contexto atual
+
+O item 8 da avaliação confere os logs: módulo, timestamp, nível e o JSON bruto em DEBUG. Os textos de exemplo da especificação servem de referência.
+
+## Objetivo
+
+Percorrer todos os módulos e garantir que cada evento da lista de exemplos da especificação é logado com o texto e o logger certos.
+
+## Dentro do escopo
+
+- [ ] Montar uma tabela `evento da especificação → logger → arquivo:linha` (em `docs/` ou no PR)
+- [ ] Corrigir textos divergentes por PR pequeno ao dono do módulo (ou pedir a ele)
+- [ ] Conferir que `DEBUG` mostra o JSON bruto de **toda** mensagem enviada/recebida
+- [ ] Conferir que a tela mostra `[CLI]`, `[Game]` e `INFO`, e o arquivo mostra tudo
+- [ ] Rodar o `spec-reviewer` na seção ""Observabilidade e Logs""
+
+## Fora do escopo
+
+- Mudar o comportamento dos módulos
+
+## Critérios de aceite
+
+- [ ] Cada linha de exemplo da especificação tem o evento correspondente no código
+- [ ] Uma partida completa gera log legível de ponta a ponta no arquivo
+
+## Itens a estudar
+
+- `logging.getLogger(name)` e propagação entre loggers
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/03-5-logs-spec.md`. Releia na `docs/especificacao.md` as seções: Observabilidade e Logs. Entre em plan mode e proponha o plano para a issue 03.5. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.1] tools/run_local.py: subir N peers locais","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | integração |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/04-1-run-local` |
+| **Depende de** | 03.1 |
+| **Etiquetas** | `parte-C` `integração` `Sprint Backlog` |
+| **Especificação** | Cenários de Teste Mínimos |
+
+## Contexto atual
+
+Para testar sozinho a malha e as partidas é preciso subir 3 peers em portas diferentes, com logs separados, e conseguir mandar comandos a cada um.
+
+## Objetivo
+
+Script que inicia N peers locais e permite enviar comandos a cada um e ver os logs.
+
+## Dentro do escopo
+
+- [ ] `python tools/run_local.py --names alice,bob,carol --base-port 8081 --namespace CIC`
+- [ ] Um subprocesso por peer com `--log-file logs/<nome>.log` e `--log-level DEBUG`
+- [ ] Entrada interativa `bob> /join alice@CIC` que envia a linha à `stdin` do peer certo
+- [ ] Encerramento limpo de todos (e opção para matar um com `kill -9`, para os cenários 7 e 9)
+- [ ] Pasta `logs/` no `.gitignore`
+
+## Fora do escopo
+
+- Automatizar as asserções dos cenários (04.2 a 04.5)
+
+## Critérios de aceite
+
+- [ ] Um comando sobe 3 peers que se descobrem no servidor público
+- [ ] É possível mandar comandos a cada peer e matar um deles de forma abrupta
+- [ ] Ao sair, nenhum processo fica órfão
+
+## Itens a estudar
+
+- `subprocess.Popen` com `stdin=PIPE` e `python -u`
+- `os.kill(pid, signal.SIGKILL)`
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-1-run-local.md`. Releia na `docs/especificacao.md` as seções: Cenários de Teste Mínimos. Entre em plan mode e proponha o plano para a issue 04.1. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.2] Integração 1: malha de descoberta (cenário 1)","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | integração |
+| **Prazo** | Seg 16/11 |
+| **Branch** | `feat/04-2-integrar-malha` |
+| **Depende de** | 01.7, 03.3 |
+| **Etiquetas** | `todos` `integração` `Sprint Backlog` |
+| **Especificação** | Cenários de Teste Mínimos (1) |
+
+## Contexto atual
+
+Primeira vez que os módulos de A e C rodam juntos. É o ponto em que a maioria dos erros de integração aparece, por isso vale a pena fazer **cedo**, antes de ter o jogo pronto.
+
+## Objetivo
+
+Três peers no mesmo namespace se registram, se descobrem e mantêm exatamente duas conexões cada.
+
+## Dentro do escopo
+
+- [ ] Subir 3 peers com `tools/run_local.py` e conferir `/conn` em cada um: duas conexões, sem duplicadas, RTT preenchido
+- [ ] Matar um peer com `kill -9`: os outros o marcam `STALE` após 3 PINGs e `/conn` deixa de listá-lo
+- [ ] Corrigir o que quebrar (no módulo do dono, por PR pequeno)
+- [ ] Escrever o resultado em `docs/testes.md` (comando, saída, data)
+
+## Fora do escopo
+
+- Partida (04.3)
+
+## Critérios de aceite
+
+- [ ] `/conn` mostra exatamente 2 conexões em cada um dos 3 peers
+- [ ] Nenhuma conexão duplicada, mesmo reiniciando os peers em ordens diferentes
+- [ ] O peer encerrado com `kill -9` some da lista em até 3 × `ping_interval`
+
+## Itens a estudar
+
+- Usar `ping_interval` curto (ex.: `--ping-interval 5` via config) só para testar
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-2-integrar-malha.md`. Releia na `docs/especificacao.md` as seções: Cenários de Teste Mínimos (1). Entre em plan mode e proponha o plano para a issue 04.2. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.3] Integração 2: partida completa (cenários 2 a 6)","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | integração |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/04-3-integrar-partida` |
+| **Depende de** | 04.2, 02.4, 02.6, 03.4 |
+| **Etiquetas** | `todos` `integração` `Sprint Backlog` |
+| **Especificação** | Cenários de Teste Mínimos (2 a 6); Exemplo Completo de Sessão |
+
+## Contexto atual
+
+Com a malha estável, B e C encaixam o jogo: host cria, dois jogadores entram, jogam e a partida termina.
+
+## Objetivo
+
+Passar os cenários 2 (vitória), 3 (derrota), 4 (fora do turno), 5 (letra repetida e `/word`) e 6 (timeout).
+
+## Dentro do escopo
+
+- [ ] Rodar cada cenário com 3 peers locais; registrar saída e logs em `docs/testes.md`
+- [ ] Comparar o log de uma partida com o ""Exemplo Completo de Sessão"" da especificação, mensagem por mensagem
+- [ ] Conferir `GAME_OVER` (`winner`, `scores`, hash `OK`) e `STATE` (`seq` sem falhas)
+- [ ] Corrigir falhas por PR pequeno ao dono do módulo
+- [ ] Opcional: automatizar um destes cenários como teste `asyncio` com dois `P2PClient` em `127.0.0.1`
+
+## Fora do escopo
+
+- Falhas e quedas (04.4)
+
+## Critérios de aceite
+
+- [ ] Cenários 2 a 6 passam, com evidência nos logs
+- [ ] Nenhum `STATE` é gerado por jogada rejeitada
+- [ ] O hash confere em todas as partidas
+
+## Itens a estudar
+
+- Ler o exemplo de sessão da especificação com a ferramenta de diff do seu editor ao lado do seu log
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-3-integrar-partida.md`. Releia na `docs/especificacao.md` as seções: Cenários de Teste Mínimos (2 a 6), Exemplo Completo de Sessão. Entre em plan mode e proponha o plano para a issue 04.3. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.4] Integração 3: falhas de jogador e de host (cenários 7 a 9)","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | integração |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/04-4-integrar-falhas` |
+| **Depende de** | 04.3, 02.5, 01.6 |
+| **Etiquetas** | `todos` `integração` `Sprint Backlog` |
+| **Especificação** | Cenários de Teste Mínimos (7 a 9); Tratamento de falhas |
+
+## Contexto atual
+
+Tolerância a falhas vale um critério inteiro da avaliação e é onde mais se perde ponto por detalhe.
+
+## Objetivo
+
+Passar os cenários 7 (queda de jogador), 8 (reconexão com rejoin) e 9 (queda do host).
+
+## Dentro do escopo
+
+- [ ] Cenário 7: `kill -9` em `carol` durante a partida; após 3 PINGs perdidos `alice` a remove, difunde `STATE` e a partida continua com `bob`
+- [ ] Cenário 8: `carol` reabre, reconecta e envia `JOIN`; recebe `rejoin: true` e o `STATE` corrente; volta ao rodízio
+- [ ] Cenário 9: `kill -9` em `alice` (host); `bob` e `carol` mostram `[Game] Host alice@CIC unreachable — game aborted` e voltam a `IDLE`
+- [ ] Registrar a evidência em `docs/testes.md` e corrigir o que falhar
+
+## Fora do escopo
+
+- Migração de host (bônus 05.1)
+
+## Critérios de aceite
+
+- [ ] Os três cenários passam, com logs que mostram a detecção e a ação
+- [ ] Depois da queda do host, os jogadores conseguem entrar em outra partida
+
+## Itens a estudar
+
+- `kill -9` não deixa o peer mandar `BYE`: é a única forma de testar a detecção por PING
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-4-integrar-falhas.md`. Releia na `docs/especificacao.md` as seções: Cenários de Teste Mínimos (7 a 9), Tratamento de falhas. Entre em plan mode e proponha o plano para a issue 04.4. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.5] Integração 4: encerramento limpo (cenário 10)","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | integração |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/04-5-integrar-quit` |
+| **Depende de** | 04.3, 01.7 |
+| **Etiquetas** | `todos` `integração` `Sprint Backlog` |
+| **Especificação** | Cenários de Teste Mínimos (10); BYE / BYE_OK |
+
+## Contexto atual
+
+O `/quit` precisa fazer tudo na ordem certa; a avaliação confere a sequência.
+
+## Objetivo
+
+Passar o cenário 10: `/quit` no host durante a partida gera `GAME_OVER ABORTED` → `BYE/BYE_OK` → `UNREGISTER`, nessa ordem.
+
+## Dentro do escopo
+
+- [ ] `/quit` no host com partida `RUNNING`: conferir a ordem pelo log `Wire` (timestamps)
+- [ ] `/quit` num jogador em partida: `LEAVE` → `BYE` → `UNREGISTER`
+- [ ] `/quit` sem partida: `BYE` e `UNREGISTER`; depois um `DISCOVER` de outro peer não o lista mais
+- [ ] `Ctrl+C` tem o mesmo comportamento
+
+## Fora do escopo
+
+- (nada em especial)
+
+## Critérios de aceite
+
+- [ ] A ordem das mensagens bate com o contrato (seção 8) nos três casos
+- [ ] O processo termina sozinho em poucos segundos, sem tarefa pendente
+- [ ] O peer some do `DISCOVER` dos outros logo após sair
+
+## Itens a estudar
+
+- Ordem dos eventos nos timestamps do arquivo de log
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-5-integrar-quit.md`. Releia na `docs/especificacao.md` as seções: Cenários de Teste Mínimos (10), BYE / BYE_OK. Entre em plan mode e proponha o plano para a issue 04.5. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.6] Interoperabilidade com o cliente de referência e o forca-bot (cenário 11)","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | integração |
+| **Prazo** | Ter 17/11 |
+| **Branch** | `feat/04-6-interoperabilidade` |
+| **Depende de** | 04.3, 00.3 |
+| **Etiquetas** | `todos` `integração` `Sprint Backlog` |
+| **Especificação** | Cenários de Teste Mínimos (11); Material Disponibilizado |
+
+## Contexto atual
+
+O item 7 da avaliação exige jogar contra o cliente de referência nos dois papéis. É onde diferenças sutis de interpretação do protocolo aparecem.
+
+## Objetivo
+
+Jogar uma partida completa como jogador contra o `forca-bot` e como host com o cliente de referência como jogador.
+
+## Dentro do escopo
+
+- [ ] Entrar numa partida do `forca-bot` (namespace `FORCA`) e jogar até o `GAME_OVER`
+- [ ] Criar partida e ter o cliente de referência como jogador
+- [ ] Se alguma mensagem for recusada, comparar o JSON com a especificação (campo faltando, tipo errado, `msg_id`)
+- [ ] Registrar o resultado em `docs/testes.md`; se o material não existir, escrever isso e o que foi feito no lugar
+
+## Fora do escopo
+
+- (nada em especial)
+
+## Critérios de aceite
+
+- [ ] Partida completa nos dois papéis, ou justificativa registrada de por que não foi possível
+- [ ] Nenhum `ERROR` inesperado nos logs
+
+## Itens a estudar
+
+- Ler o JSON bruto (`Wire`) do cliente de referência para ver o formato exato que ele envia
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-6-interoperabilidade.md`. Releia na `docs/especificacao.md` as seções: Cenários de Teste Mínimos (11), Material Disponibilizado. Entre em plan mode e proponha o plano para a issue 04.6. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[04.7] Revisão final, README e entrega","| | |
+|---|---|
+| **Responsável** | Todos |
+| **Área** | integração |
+| **Prazo** | Qua 18/11 (manhã) |
+| **Branch** | `feat/04-7-entrega` |
+| **Depende de** | 04.4, 04.5, 04.6, 03.5 |
+| **Etiquetas** | `todos` `integração` `Sprint Backlog` |
+| **Especificação** | Critérios de Avaliação; Cenários de Teste Mínimos |
+
+## Contexto atual
+
+Último dia: nada de funcionalidade nova. É hora de conferir tudo contra os oito critérios de avaliação.
+
+## Objetivo
+
+Entregar um repositório que roda do zero e cumpre os critérios.
+
+## Dentro do escopo
+
+- [ ] Clonar o repositório numa pasta limpa, criar o venv e rodar os **11 cenários** do início ao fim
+- [ ] Passar o `spec-reviewer` em cada seção principal e fechar o que sobrar
+- [ ] Percorrer a tabela de Critérios de Avaliação (1 a 8) marcando o que está coberto e onde
+- [ ] `README.md` com como instalar, rodar, comandos, estrutura, limitações conhecidas e o nome de cada integrante
+- [ ] Conferir `config.json`, `words.txt` e que nenhum segredo/log foi para o repositório
+- [ ] Cada integrante lê o diff do que entrega e se prepara para explicar o próprio módulo
+- [ ] Entregar da forma que o professor pedir (anotada na seção 9 do contrato)
+
+## Fora do escopo
+
+- Qualquer funcionalidade nova (bônus só se tudo acima estiver pronto)
+
+## Critérios de aceite
+
+- [ ] O repositório clonado do zero roda e passa nos cenários
+- [ ] `python -m pytest -q` verde
+- [ ] README completo e sem pendências no `docs/CONTRATO.md`
+- [ ] A entrega foi feita no formato e prazo combinados
+
+## Itens a estudar
+
+- Reler a tabela de Critérios de Avaliação da especificação, item por item
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/04-7-entrega.md`. Releia na `docs/especificacao.md` as seções: Critérios de Avaliação, Cenários de Teste Mínimos. Entre em plan mode e proponha o plano para a issue 04.7. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[05.1] Bônus: migração de host","| | |
+|---|---|
+| **Responsável** | Parte B: Jogo |
+| **Área** | bônus |
+| **Prazo** | Qua 18/11 (manhã) |
+| **Branch** | `feat/05-1-bonus-migracao-host` |
+| **Depende de** | 04.4 |
+| **Etiquetas** | `parte-B` `bônus` `Sprint Backlog` |
+| **Especificação** | Tratamento de falhas (Bônus: migração de host) |
+
+## Contexto atual
+
+**Só se todo o restante estiver pronto.** Ao detectar a queda do host, o jogador de menor `peer_id` assume como novo host e recomeça a partida.
+
+## Objetivo
+
+Implementar a eleição e o recomeço de partida conforme o bônus da especificação.
+
+## Dentro do escopo
+
+- [ ] Ao `peer_stale` do host, o menor `peer_id` entre os `players` do último `STATE` vira host
+- [ ] Novo host sorteia palavra, calcula novo `word_hash` e envia `GAME_START` com o mesmo `game_id` aos demais
+- [ ] A partida recomeça com as vidas do último `STATE`
+- [ ] Atualizar contrato e testes
+
+## Fora do escopo
+
+- Qualquer item obrigatório
+
+## Critérios de aceite
+
+- [ ] Com `kill -9` no host, a partida continua com um novo host
+- [ ] O cenário 9 original continua válido quando o bônus está desligado/ não há jogadores suficientes
+
+## Itens a estudar
+
+- Eleição de líder pelo menor identificador
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/05-1-bonus-migracao-host.md`. Releia na `docs/especificacao.md` as seções: Tratamento de falhas (Bônus: migração de host). Entre em plan mode e proponha o plano para a issue 05.1. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
+"[05.2] Bônus: chat na partida","| | |
+|---|---|
+| **Responsável** | Parte C: CLI e integração |
+| **Área** | bônus |
+| **Prazo** | Qua 18/11 (manhã) |
+| **Branch** | `feat/05-2-bonus-chat` |
+| **Depende de** | 04.3 |
+| **Etiquetas** | `parte-C` `bônus` `Sprint Backlog` |
+| **Especificação** | Critérios de Avaliação (Bônus) |
+
+## Contexto atual
+
+**Só se todo o restante estiver pronto.** Mensagem `CHAT` enviada ao host e difundida por ele aos jogadores.
+
+## Objetivo
+
+Adicionar `CHAT` ao protocolo (contrato primeiro) e o comando `/chat <texto>`.
+
+## Dentro do escopo
+
+- [ ] Definir `CHAT` em `docs/CONTRATO.md` e `protocol.py`
+- [ ] `GameHost` difunde o texto a todos com o remetente
+- [ ] `/chat <texto>` na CLI e exibição `[Game]`
+
+## Fora do escopo
+
+- Qualquer item obrigatório
+
+## Critérios de aceite
+
+- [ ] Mensagem de um jogador aparece para todos os demais
+- [ ] Peers sem suporte ignoram sem quebrar (`unknown_type` não derruba a conexão)
+
+## Itens a estudar
+
+- Como adicionar um tipo ao `ALL_TYPES` e a `REQUIRED_FIELDS`
+
+## Prompt sugerido para o Claude Code
+
+```text
+Leia `CLAUDE.md`, `docs/CONTRATO.md` e `docs/issues/05-2-bonus-chat.md`. Releia na `docs/especificacao.md` as seções: Critérios de Avaliação (Bônus). Entre em plan mode e proponha o plano para a issue 05.2. Só implemente depois que eu aprovar, com os testes, e confira os critérios de aceite um a um no final.
+```
+"
