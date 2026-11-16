@@ -206,6 +206,7 @@ Se o professor responder diferente, altere aqui e avise.
 14. **`GAME_START` ou `STATE` de `src` que não é o host do jogador** (ou de `game_id` diferente do atual): o jogador ignora e responde `ERROR invalid_state`. Mensagem de partida de peer sem `"hangman"` é descartada pelo roteador sem resposta.
 15. **`GUESS` de quem não é jogador da partida** (e `GUESS` sem partida `RUNNING`): `GUESS_RESULT accepted:false reason:"game_not_running"` se há partida do host mas não está `RUNNING`; `ERROR invalid_state` se o host não tem partida alguma ou o `src` não está nela.
 16. **Palpite de letra com mais de um caractere ou fora de `a-z`**: `GUESS_RESULT reason:"invalid_letter"`. Letra maiúscula é normalizada para minúscula antes de checar.
+17. **Sem cliente de referência nem `forca-bot`:** a interoperabilidade (cenário 11 e issue 04.6) é testada entre **os próprios clientes do grupo**, em máquinas diferentes quando possível, e o que não puder ser verificado contra um cliente de terceiros é registrado como tal na entrega.
 
 ## 7. Logging
 
@@ -238,7 +239,7 @@ Na tela: `INFO` ou acima, mais tudo de `CLI` e `Game`. No arquivo (`--log-file`)
 Anote a resposta ao lado e depois mova para a seção 6.
 
 - [ ] `/cancel` deve mesmo usar `reason: "host_shutdown"`? (a especificação só lista `host_shutdown` e `no_players`)
-- [ ] O `forca-bot` e o cliente de referência estão disponíveis em qual endereço/namespace? (`FORCA`)
-- [ ] Onde obter `words.txt`, `config.json` oficiais e o roteiro de testes?
+- [x] O `forca-bot` e o cliente de referência estão disponíveis em qual endereço/namespace? (`FORCA`) **Resposta (15/11): não existem.** O repositório `mfcaetano/pyp2p-rdv` só contém o servidor Rendezvous (`pyp2p.mfcaetano.cc:8080`). Ver decisão 17.
+- [x] Onde obter `words.txt`, `config.json` oficiais e o roteiro de testes? **Resposta (15/11): não existem.** Usamos o `words.txt` e o `config.json` de exemplo do repositório; o roteiro é a seção "Cenários de Teste Mínimos" da especificação. Se o professor publicar versões oficiais, substituir.
 - [ ] Há apresentação ou só entrega de código? O que entregar (repositório, relatório, vídeo)?
 - [ ] Política de uso de IA no trabalho.
