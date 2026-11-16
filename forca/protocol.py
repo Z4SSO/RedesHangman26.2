@@ -83,6 +83,79 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Tipo esperado de cada campo (checado só se o campo estiver presente; a
+# presença é checada por REQUIRED_FIELDS). Tipos: "str", "int", "bool",
+# "list_str" (lista de strings), "list", "dict", "dict_or_null", "str_or_null".
+FIELD_TYPES: dict[str, dict[str, str]] = {
+    "HELLO": {"peer_id": "str", "version": "str", "features": "list_str"},
+    "HELLO_OK": {"peer_id": "str", "version": "str", "features": "list_str"},
+    "PING": {"timestamp": "str"},
+    "PONG": {"timestamp": "str"},
+    "BYE": {"reason": "str"},
+    "ERROR": {"code": "str", "message": "str", "ref_msg_id": "str"},
+    "GAME_LIST_OK": {"games": "list"},
+    "JOIN": {"game_id": "str"},
+    "JOIN_OK": {"game_id": "str", "players": "list_str", "rejoin": "bool"},
+    "JOIN_ERR": {"game_id": "str", "reason": "str"},
+    "LEAVE": {"game_id": "str"},
+    "LEAVE_OK": {"game_id": "str"},
+    "GAME_START": {
+        "game_id": "str",
+        "players": "list_str",
+        "lives": "int",
+        "word_length": "int",
+        "word_hash": "str",
+        "turn_timeout": "int",
+    },
+    "STATE": {
+        "game_id": "str",
+        "seq": "int",
+        "masked": "str",
+        "wrong_letters": "list_str",
+        "lives": "int",
+        "turn": "str",
+        "players": "list_str",
+        "last_guess": "dict_or_null",
+    },
+    "GUESS": {"game_id": "str", "letter": "str", "word": "str"},
+    "GUESS_RESULT": {
+        "game_id": "str",
+        "accepted": "bool",
+        "reason": "str",
+        "correct": "bool",
+    },
+    "GAME_OVER": {
+        "game_id": "str",
+        "result": "str",
+        "word": "str",
+        "winner": "str_or_null",
+        "scores": "dict",
+        "reason": "str",
+    },
+}
+
+
+def _type_ok(value: object, kind: str) -> bool:
+    # bool é subclasse de int em Python: não aceitar True como inteiro.
+    if kind == "str":
+        return isinstance(value, str)
+    if kind == "int":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "bool":
+        return isinstance(value, bool)
+    if kind == "list":
+        return isinstance(value, list)
+    if kind == "list_str":
+        return isinstance(value, list) and all(isinstance(v, str) for v in value)
+    if kind == "dict":
+        return isinstance(value, dict)
+    if kind == "dict_or_null":
+        return value is None or isinstance(value, dict)
+    if kind == "str_or_null":
+        return value is None or isinstance(value, str)
+    return True
+
+
 class ErrorCode:
     """Valores do campo `code` da mensagem ERROR."""
 
@@ -247,6 +320,7 @@ def validate_envelope(msg: dict, local_peer_id: str | None = None) -> None:
       3. src/dst (exceto tipos de conexão)
       4. dst == local_peer_id      -> not_for_me
       5. campos obrigatórios do tipo -> bad_request
+      6. tipo de cada campo presente (FIELD_TYPES) -> bad_request
     """
     ref = msg.get("msg_id") if isinstance(msg.get("msg_id"), str) else None
     type_ = msg.get("type")
@@ -279,4 +353,10 @@ def validate_envelope(msg: dict, local_peer_id: str | None = None) -> None:
         if ("letter" in msg) == ("word" in msg):
             raise ProtocolError(
                 ErrorCode.BAD_REQUEST, "GUESS needs exactly one of letter/word", ref
+            )
+
+    for key, kind in FIELD_TYPES.get(type_, {}).items():
+        if key in msg and not _type_ok(msg[key], kind):
+            raise ProtocolError(
+                ErrorCode.BAD_REQUEST, f"field {key} must be {kind}", ref
             )

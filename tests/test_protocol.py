@@ -141,3 +141,61 @@ def test_config_rejects_unknown_key(tmp_path):
     path.write_text(json.dumps({"nme": "typo"}))
     with pytest.raises(ValueError):
         load_config(path)
+
+
+def _state(**over):
+    fields = dict(
+        game_id="alice@CIC/3f9a2c1b", seq=1, masked="____", wrong_letters=[],
+        lives=6, turn="bob@CIC", players=["bob@CIC"],
+    )
+    fields.update(over)
+    return p.new_message("STATE", src="alice@CIC", dst="bob@CIC", **fields)
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"seq": "1"},
+        {"seq": True},
+        {"players": 5},
+        {"players": [1, 2]},
+        {"wrong_letters": "e"},
+        {"masked": None},
+        {"last_guess": "x"},
+    ],
+)
+def test_wrong_field_type_is_bad_request(over):
+    with pytest.raises(p.ProtocolError) as exc:
+        p.validate_envelope(_state(**over), "bob@CIC")
+    assert exc.value.code == p.ErrorCode.BAD_REQUEST
+    assert not exc.value.silent
+
+
+def test_state_with_null_last_guess_is_valid():
+    p.validate_envelope(_state(last_guess=None), "bob@CIC")
+
+
+def test_game_over_winner_null_is_valid():
+    msg = p.new_message(
+        "GAME_OVER", src="alice@CIC", dst="bob@CIC", game_id="g",
+        result="LOST", word="banana", winner=None, scores={"bob@CIC": 1},
+    )
+    p.validate_envelope(msg, "bob@CIC")
+
+
+def test_join_ok_rejoin_must_be_bool():
+    msg = p.new_message(
+        "JOIN_OK", src="alice@CIC", dst="bob@CIC", game_id="g",
+        players=["bob@CIC"], rejoin="false",
+    )
+    with pytest.raises(p.ProtocolError) as exc:
+        p.validate_envelope(msg, "bob@CIC")
+    assert exc.value.code == p.ErrorCode.BAD_REQUEST
+
+
+def test_hello_features_must_be_list_of_str():
+    msg = p.new_message(
+        "HELLO", peer_id="bob@CIC", version="1.0", features="hangman"
+    )
+    with pytest.raises(p.ProtocolError):
+        p.validate_envelope(msg)
