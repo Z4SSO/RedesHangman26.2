@@ -70,6 +70,12 @@ class MessageRouter:
 
         if type_ == "ERROR":
             log.warning("ERROR from %s: %s: %s (ref %s)", conn.peer_id, msg["code"], msg["message"], msg.get("ref_msg_id"))
+            # O ERROR tem msg_id novo e aponta a causa em ref_msg_id: se a causa é um request()
+            # nosso, encerra o pedido em vez de esperar o timeout inteiro.
+            ref = msg.get("ref_msg_id")
+            pending = self._pending.get(ref) if isinstance(ref, str) else None
+            if pending and pending[0] == msg["src"] and not pending[1].done():
+                pending[1].set_result(msg)
             return  # nunca responde
 
         if type_ in GAME_FEATURE_TYPES and p.FEATURE_HANGMAN not in (getattr(conn, "features", None) or []):
@@ -92,7 +98,8 @@ class MessageRouter:
 
     # --- saída ---
     async def request(self, peer_id: str, msg: dict, timeout: float = 5.0) -> dict | None:
-        """Envia e espera a resposta com o MESMO msg_id (GAME_LIST_OK, ...).
+        """Envia e espera a resposta com o MESMO msg_id (GAME_LIST_OK, ...) ou um ERROR
+        que aponte para ele em ref_msg_id: quem chama confere `reply["type"]`.
         None se estourar o timeout ou se o peer não estiver conectado. Respostas
         pendentes não vão para os handlers."""
         msg_id = msg["msg_id"]

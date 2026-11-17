@@ -243,3 +243,40 @@ async def test_cancel_and_leave(w, caplog):
     await run(w.alice, "/cancel")
     assert not w.alice.host.active and not w.bob.player.active
     assert any("Partida cancelada" in m for m in out(caplog)) and any("Você saiu" in m for m in out(caplog))
+
+
+# --- revisão: /games só lista abertas e não espera quem responde ERROR ---
+
+
+async def test_games_lists_only_open_games_and_says_how_many_were_hidden(w, caplog):
+    await run(w.alice, "/create casa")
+    await run(w.bob, "/join alice")
+    await run(w.alice, "/start")  # alice agora está RUNNING
+    await run(w.carol, "/games")
+    msgs = out(caplog)
+    assert not any(m.startswith("  ") for m in msgs)
+    assert any("Nenhuma partida aberta" in m and "1 em andamento" in m for m in msgs)
+
+
+async def test_games_does_not_wait_for_a_neighbor_that_answers_error(net, caplog):
+    from forca import protocol as p
+
+    world = make_world(net, ["alice", "bob", "dave"])
+
+    async def refuse(conn, msg):
+        await world["dave"].table.send_to(msg["src"], p.make_error(msg, "invalid_state", "no", src="dave@CIC"))
+
+    world["dave"].router.register("GAME_LIST", refuse)
+    world["bob"].cli.games_timeout = 5.0
+    await world["alice"].host.create("casa")
+    started = time.monotonic()
+    await run(world["bob"], "/games")
+    assert time.monotonic() - started < 1  # o ERROR do dave encerra o pedido na hora
+    assert any("alice@CIC/" in m for m in out(caplog))
+    await world["alice"].host.shutdown()
+
+
+async def test_create_with_a_unicode_digit_is_a_usage_error_not_a_traceback(w, caplog):
+    await run(w.alice, "/create casa ²")
+    assert w.alice.host.status == GameStatus.IDLE and "Traceback" not in caplog.text
+    assert any("uso: /create" in m for m in out(caplog))

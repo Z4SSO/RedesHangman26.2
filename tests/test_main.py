@@ -164,3 +164,33 @@ async def test_run_stops_the_client_even_if_the_cli_fails(clean_logging, monkeyp
     with pytest.raises(RuntimeError):
         await m.run(cfg, m.ScreenFilter())
     assert calls == ["init", "start", "cli", "stop"]
+
+
+# --- revisão: erro do Rendezvous na subida e config inexistente ---
+
+
+def test_rendezvous_error_at_startup_is_a_message_not_a_traceback(clean_logging, monkeypatch, capsys):
+    from forca.rendezvous_connection import RendezvousError
+
+    class FailingClient:
+        def __init__(self, cfg): pass
+        async def start(self): raise RendezvousError("name_taken")
+        async def stop(self): pass
+
+    class IdleCLI:
+        def __init__(self, client, set_level): pass
+        def request_quit(self): pass
+        async def run(self): pass
+
+    monkeypatch.setattr(m, "P2PClient", FailingClient)
+    monkeypatch.setattr(m, "CLI", IdleCLI)
+    with pytest.raises(SystemExit) as exc:
+        m.main(["--config", "/nonexistent.json"])
+    out = capsys.readouterr().out
+    assert exc.value.code == 1 and "name_taken" in out and "Traceback" not in out
+
+
+def test_a_missing_config_file_warns_and_uses_the_defaults(clean_logging, capsys):
+    m.setup_logging("INFO")
+    cfg = m.build_config(m.parse_args(["--config", "/typo/config.json"]))
+    assert cfg.namespace == "CIC" and "não encontrado" in capsys.readouterr().out

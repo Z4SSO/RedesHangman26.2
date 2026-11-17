@@ -110,3 +110,12 @@ async def test_quit_all_leaves_no_orphan_even_if_a_peer_ignores_quit(fake_peer, 
     assert launcher.alive() == [] and all(p.returncode is not None for p in launcher.peers.values())
     assert "[run_local] bob não saiu em 0.5 s: SIGKILL" in out
     assert any("[alice] terminou (código 0)" in l for l in out)  # quem obedeceu saiu limpo
+
+
+async def test_kill_needs_the_exact_command(fake_peer, tmp_path):
+    launcher, out = await make(fake_peer, tmp_path)
+    try:
+        await launcher.handle("!killall")  # não é "!kill": não pode matar ninguém
+        assert launcher.alive() == ["alice", "bob", "carol"] and any("uso:" in l for l in out)
+    finally:
+        await launcher.quit_all(1)

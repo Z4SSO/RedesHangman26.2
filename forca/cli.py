@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import sys
 import threading
@@ -51,7 +52,9 @@ HELP = (
     ("/quit", "encerra (LEAVE/GAME_OVER conforme o papel, BYE a todos, UNREGISTER)"),
 )
 
-MIN_DISCOVER_GAP = 2.0  # s entre DISCOVERs: o Rendezvous bloqueia acima de 50 req/min
+# s entre consultas manuais ao Rendezvous (/peers e /reconnect). O limite é de 50 req/min POR IP,
+# e os peers do run_local saem todos pelo mesmo IP: 5 s dá no máximo 12/min por peer.
+MIN_DISCOVER_GAP = 5.0
 GAMES_TIMEOUT = 3.0  # s que o /games espera cada vizinho; quem não responde não trava o comando
 _STDIN = object()  # "use sys.stdin" (resolvido na hora de rodar, para os testes poderem trocá-lo)
 
@@ -70,6 +73,7 @@ class CLI:
         self._clock = clock
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._quit = False
+        self._current: asyncio.Future | None = None  # o comando em andamento
         self._last_discover = float("-inf")
         self.games_timeout = GAMES_TIMEOUT
         self._commands: dict[str, Callable[[list[str]], Awaitable[None]]] = {
@@ -87,8 +91,12 @@ class CLI:
         self._queue.put_nowait(line)
 
     def request_quit(self) -> None:
-        """Ctrl+C / SIGTERM: mesmo caminho do /quit."""
-        self.feed("/quit")
+        """Ctrl+C / SIGTERM: mesmo caminho do /quit, e interrompe um comando que esteja
+        pendurado na rede (senão o Ctrl+C só seria lido depois dele)."""
+        self._quit = True
+        if self._current is not None and not self._current.done():
+            self._current.cancel()
+        self.feed("/quit")  # acorda o laço se ele estiver esperando uma linha
 
     def _read_stdin(self, stream, loop: asyncio.AbstractEventLoop) -> None:
         """Thread daemon: lê o teclado sem bloquear o event loop. EOF vale como /quit."""
@@ -104,7 +112,15 @@ class CLI:
             threading.Thread(target=self._read_stdin, args=(stream, loop), daemon=True).start()
         log.info("Digite /help para ver os comandos.")
         while not self._quit:
-            await self.execute(await self._queue.get())
+            line = await self._queue.get()
+            self._current = asyncio.ensure_future(self.execute(line))
+            try:
+                await self._current
+            except asyncio.CancelledError:
+                if not self._quit:  # cancelamento de fora, não do request_quit
+                    raise
+            finally:
+                self._current = None
 
     async def execute(self, line: str) -> None:
         """Interpreta uma linha. Nada aqui derruba o programa."""
@@ -127,6 +143,13 @@ class CLI:
             log.exception("erro ao executar %s", cmd)
 
     # --- comandos de rede ---
+    def _rendezvous_gap(self) -> None:
+        """Intervalo mínimo entre consultas manuais ao Rendezvous (/peers e /reconnect)."""
+        wait = MIN_DISCOVER_GAP - (self._clock() - self._last_discover)
+        if wait > 0:
+            raise UsageError(f"aguarde {math.ceil(wait)} s entre consultas ao Rendezvous")
+        self._last_discover = self._clock()
+
     async def cmd_peers(self, args: list[str]) -> None:
         """/peers [* | #namespace]: DISCOVER e lista (respeita o limite do Rendezvous)."""
         if len(args) > 1:
@@ -139,10 +162,7 @@ class CLI:
             ns = args[0][1:]
         else:
             raise UsageError("uso: /peers [* | #namespace]")
-        wait = MIN_DISCOVER_GAP - (self._clock() - self._last_discover)
-        if wait > 0:
-            raise UsageError(f"aguarde {wait:.0f} s entre consultas ao Rendezvous")
-        self._last_discover = self._clock()
+        self._rendezvous_gap()
         try:
             peers = await self.client.rdv.discover(ns)
         except RendezvousError as exc:
@@ -172,7 +192,8 @@ class CLI:
             log.info("  %-24s RTT médio %s", c.peer_id, _rtt(c))
 
     async def cmd_reconnect(self, args: list[str]) -> None:
-        """/reconnect: reconciliação imediata com o Rendezvous."""
+        """/reconnect: reconciliação imediata com o Rendezvous (mesmo limite do /peers)."""
+        self._rendezvous_gap()
         log.info("Reconciliando com o Rendezvous...")
         await self.client.reconcile_now()
         log.info("Reconciliação concluída.")
@@ -218,8 +239,9 @@ class CLI:
             return await self.client.router.request(pid, msg, timeout=self.games_timeout)
 
         replies = await asyncio.gather(*(ask(pid) for pid in peer_ids))
+        # r pode ser um ERROR (o vizinho recusou): trata como sem resposta
         return {pid: [g for g in r["games"] if isinstance(g, dict)]
-                for pid, r in zip(peer_ids, replies) if r is not None}
+                for pid, r in zip(peer_ids, replies) if r is not None and r.get("type") == "GAME_LIST_OK"}
 
     async def cmd_games(self, args: list[str]) -> None:
         """/games: GAME_LIST a todos os vizinhos com hangman e consolida as respostas."""
@@ -228,14 +250,18 @@ class CLI:
             log.info("Nenhum vizinho conectado com a feature hangman.")
             return
         found = [g for games in (await self._game_lists(peers)).values() for g in games]
-        if not found:
-            log.info("Nenhuma partida aberta (%d vizinho(s) consultado(s)).", len(peers))
+        open_games = [g for g in found if g.get("status") == "OPEN"]
+        hidden = len(found) - len(open_games)  # RUNNING/FINISHED: a especificação lista só as abertas
+        note = f"; {hidden} em andamento ou encerrada(s)" if hidden else ""
+        if not open_games:
+            log.info("Nenhuma partida aberta (%d vizinho(s) consultado(s)%s).", len(peers), note)
             return
-        log.info("Partidas:")
-        for g in sorted(found, key=lambda g: str(g.get("game_id"))):
-            tag = "" if g.get("status") == "OPEN" else f"  [{g.get('status')}]"
-            log.info("  %s  host=%s  %d/%s jogadores  %s letras  %s vidas%s", g.get("game_id"), g.get("host"),
-                     len(g.get("players") or []), g.get("max_players"), g.get("word_length"), g.get("lives"), tag)
+        log.info("Partidas abertas:")
+        for g in sorted(open_games, key=lambda g: str(g.get("game_id"))):
+            log.info("  %s  host=%s  %d/%s jogadores  %s letras  %s vidas", g.get("game_id"), g.get("host"),
+                     len(g.get("players") or []), g.get("max_players"), g.get("word_length"), g.get("lives"))
+        if hidden:
+            log.info("(%d em andamento ou encerrada(s) não listada(s))", hidden)
 
     async def _random_word(self) -> str:
         path = Path(self.client.cfg.words_file)
@@ -266,7 +292,7 @@ class CLI:
             raise UsageError(usage)
         max_players = None
         if rest:
-            if not rest[0].isdigit():
+            if not (rest[0].isascii() and rest[0].isdigit()):  # "²" é isdigit() mas não vira int
                 raise UsageError(usage)
             max_players = int(rest[0])
         self._require_idle()
@@ -317,6 +343,8 @@ class CLI:
 
     async def cmd_leave(self, args: list[str]) -> None:
         if not self.client.player.active:
+            if self.client.host.active:
+                raise UsageError("Você é o host desta partida: use /cancel para encerrá-la.")
             raise UsageError("Você não está em uma partida como jogador.")
         await self.client.player.leave()
         log.info("Você saiu da partida.")

@@ -156,7 +156,7 @@ async def test_peers_default_all_and_namespace_forms(clock, caplog):
     cli = make_cli(client, clock=clock)
     for command, expected in (("/peers", "CIC"), ("/peers *", None), ("/peers #FORCA", "FORCA")):
         await cli.execute(command)
-        clock.t += 5
+        clock.t += 6
         assert client.rdv.calls[-1] == expected
     out = lines(caplog)
     assert any("bob@CIC" in m and "conectado" in m for m in out)
@@ -169,7 +169,7 @@ async def test_peers_respects_the_rendezvous_rate_limit(clock, caplog):
     await cli.execute("/peers")
     await cli.execute("/peers")  # logo em seguida: recusado
     assert len(client.rdv.calls) == 1 and any("aguarde" in m for m in lines(caplog))
-    clock.t += 2.5
+    clock.t += 5.5
     await cli.execute("/peers")
     assert len(client.rdv.calls) == 2
 
@@ -232,3 +232,44 @@ async def test_stdin_thread_feeds_lines_and_eof_means_quit(caplog):
     await asyncio.wait_for(cli.run(), 2)  # sem /quit: o EOF encerra
     out = lines(caplog)
     assert any("Conexões ativas" in m for m in out) and any("RTT médio" in m for m in out)
+
+
+# --- revisão: /reconnect e /peers dividem o limite do Rendezvous; Ctrl+C com comando lento ---
+
+
+async def test_reconnect_and_peers_share_the_rendezvous_gap(clock, caplog):
+    client = FakeClient()
+    cli = make_cli(client, clock=clock)
+    await cli.execute("/reconnect")
+    await cli.execute("/reconnect")  # colar o comando várias vezes não passa de 50 req/min
+    await cli.execute("/peers")
+    assert client.reconciled == 1 and not client.rdv.calls
+    assert sum("aguarde" in m for m in lines(caplog)) == 2
+    clock.t += 5.5
+    await cli.execute("/peers")
+    assert len(client.rdv.calls) == 1
+
+
+async def test_ctrl_c_interrupts_a_slow_command():
+    client = FakeClient()
+
+    async def hang(namespace=None):
+        await asyncio.sleep(30)
+
+    client.rdv.discover = hang
+    cli = make_cli(client)
+    cli.feed("/peers")
+    task = asyncio.create_task(cli.run())
+    await asyncio.sleep(0.05)  # o /peers está pendurado no Rendezvous
+    started = asyncio.get_running_loop().time()
+    cli.request_quit()  # o que Ctrl+C / SIGTERM chamam
+    await asyncio.wait_for(task, 2)
+    assert asyncio.get_running_loop().time() - started < 1
+
+
+async def test_leave_tells_the_host_to_use_cancel(caplog):
+    client = FakeClient()
+    client.host = SimpleNamespace(active=True)
+    client.player = SimpleNamespace(active=False)
+    await make_cli(client).execute("/leave")
+    assert any("/cancel" in m for m in lines(caplog))

@@ -8,9 +8,11 @@ Entrada (uma linha por comando):
     all /conn               manda para todos
     !kill carol             SIGKILL no carol (cenários 7 e 9: queda abrupta)
     !list                   mostra quem está vivo
-    !quit                   encerra todos (envia /quit, espera 5 s, mata quem sobrar)
+    !quit                   encerra todos (envia /quit, espera --grace s, mata quem sobrar)
 
-Cada peer escreve o log completo em logs/<nome>.log. Fechar a entrada (Ctrl+D) ou Ctrl+C
+Todos os peers saem pelo MESMO IP (o limite do Rendezvous é por IP) e se registram com o IP
+público: no servidor compartilhado use um --namespace só seu (ex.: --namespace CIC-caio) para não
+colidir com peers de outros grupos. Cada peer escreve o log completo em logs/<nome>.log. Fechar a entrada (Ctrl+D) ou Ctrl+C
 também encerra tudo; nenhum processo fica órfão.
 """
 
@@ -26,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
-GRACE = 5.0  # s que o /quit tem antes de o peer ser morto
+GRACE = 10.0  # s que o /quit tem antes de o peer ser morto (o BYE espera até 2 s por vizinho)
 
 
 def peer_command(name: str, port: int, namespace: str, log_level: str, log_dir: Path) -> list[str]:
@@ -148,7 +150,7 @@ async def run(args: argparse.Namespace) -> None:
         while await launcher.handle(await queue.get()):
             pass
     finally:
-        await launcher.quit_all()
+        await launcher.quit_all(args.grace)
 
 
 def main() -> None:
@@ -157,6 +159,7 @@ def main() -> None:
     ap.add_argument("--base-port", type=int, default=8081)
     ap.add_argument("--namespace", default="CIC")
     ap.add_argument("--log-level", default="DEBUG", help="nível mostrado na tela de cada peer")
+    ap.add_argument("--grace", type=float, default=GRACE, help="s para os peers saírem no /quit antes do SIGKILL")
     asyncio.run(run(ap.parse_args()))
 
 

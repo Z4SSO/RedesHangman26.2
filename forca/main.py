@@ -15,6 +15,7 @@ from pathlib import Path
 from .cli import CLI
 from .config import Config, load_config
 from .p2p_client import P2PClient
+from .rendezvous_connection import RendezvousError
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s [%(name)s] %(message)s"
 SCREEN_ALWAYS = frozenset({"CLI", "Game"})  # mensagens ao usuário: aparecem em qualquer nível
@@ -56,6 +57,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> Config:
     """Linha de comando > config.json > padrão. ValueError se algo for inválido."""
+    if not Path(args.config).exists():  # um erro de digitação no caminho não pode passar em silêncio
+        log.warning("arquivo de configuração %s não encontrado; usando os padrões", args.config)
     cfg = load_config(
         args.config,
         {k: getattr(args, k) for k in
@@ -143,7 +146,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(2) from None
     try:
         asyncio.run(run(cfg, screen))
-    except OSError as exc:  # ex.: porta de escuta em uso
+    except (OSError, RendezvousError) as exc:  # ex.: porta em uso, nome já registrado
         log.error("não foi possível iniciar: %s", exc)
         raise SystemExit(1) from None
 

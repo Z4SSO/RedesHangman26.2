@@ -198,3 +198,70 @@ async def test_reply_from_the_wrong_peer_does_not_complete_the_request():
     forged = p.new_message("GAME_LIST_OK", src="carol@CIC", dst=ME, msg_id=req["msg_id"], games=[])
     await router.on_message(FakeConnection("carol@CIC"), forged)
     assert await task is None and len(h.calls) == 1  # a falsa vai ao handler, não ao request
+
+
+# --- revisão: ERROR como resposta a request(), envelopes inválidos e respostas tardias ---
+
+
+async def test_error_reply_completes_the_request_at_once():
+    router, _ = make_request_router()
+    req = p.new_message("GAME_LIST", src=ME, dst="bob@CIC")
+    task = asyncio.create_task(router.request("bob@CIC", req, timeout=5))
+    await asyncio.sleep(0)
+    err = p.new_message("ERROR", src="bob@CIC", dst=ME, code="invalid_state", message="x", ref_msg_id=req["msg_id"])
+    await router.on_message(FakeConnection("bob@CIC"), err)
+    reply = await asyncio.wait_for(task, 1)  # não espera os 5 s
+    assert reply["type"] == "ERROR" and reply["code"] == "invalid_state"
+
+
+async def test_error_from_the_wrong_peer_does_not_complete_the_request():
+    router, _ = make_request_router()
+    req = p.new_message("GAME_LIST", src=ME, dst="bob@CIC")
+    task = asyncio.create_task(router.request("bob@CIC", req, timeout=0.1))
+    await asyncio.sleep(0)
+    err = p.new_message("ERROR", src="carol@CIC", dst=ME, code="invalid_state", message="x", ref_msg_id=req["msg_id"])
+    await router.on_message(FakeConnection("carol@CIC"), err)
+    assert await task is None
+
+
+async def test_invalid_error_messages_are_never_answered(router, conn):
+    wrong_ttl = p.new_message("ERROR", src="bob@CIC", dst=ME, code="x", message="y")
+    wrong_ttl["ttl"] = 5
+    wrong_dst = p.new_message("ERROR", src="bob@CIC", dst="carol@CIC", code="x", message="y")
+    await router.on_message(conn, wrong_ttl)
+    await router.on_message(conn, wrong_dst)
+    assert not conn.sent
+
+
+@pytest.mark.parametrize("fields", [
+    {"type": "STATE", "game_id": "g", "seq": "1", "masked": "_", "wrong_letters": [], "lives": 6, "turn": "a", "players": []},
+    {"type": "GUESS", "game_id": "g", "letter": "a", "word": "casa"},  # os dois
+    {"type": "GUESS", "game_id": "g"},  # nenhum
+    {"type": "GUESS", "game_id": "g", "letter": 7},
+])
+async def test_bad_request_for_wrong_game_message_shapes(router, conn, fields):
+    kind = fields.pop("type")
+    await router.on_message(conn, p.new_message(kind, src="bob@CIC", dst=ME, **fields))
+    assert [m["code"] for m in conn.sent] == ["bad_request"]
+
+
+async def test_late_reply_after_timeout_goes_to_the_handler_and_cleans_up():
+    router, _ = make_request_router()
+    h = Recorder()
+    router.register("GAME_LIST_OK", h)
+    req = p.new_message("GAME_LIST", src=ME, dst="bob@CIC")
+    assert await router.request("bob@CIC", req, timeout=0.05) is None
+    late = p.new_message("GAME_LIST_OK", src="bob@CIC", dst=ME, msg_id=req["msg_id"], games=[])
+    await router.on_message(FakeConnection("bob@CIC"), late)
+    assert len(h.calls) == 1 and not router._pending
+
+
+async def test_cancelled_request_cleans_the_pending_entry():
+    router, _ = make_request_router()
+    req = p.new_message("GAME_LIST", src=ME, dst="bob@CIC")
+    task = asyncio.create_task(router.request("bob@CIC", req, timeout=5))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not router._pending
