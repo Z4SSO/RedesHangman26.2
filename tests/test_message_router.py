@@ -265,3 +265,14 @@ async def test_cancelled_request_cleans_the_pending_entry():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert not router._pending
+
+
+# --- revisão 2: linha inválida antes do HELLO ---
+
+
+async def test_on_bad_line_before_the_hello_sends_nothing(router, caplog):
+    caplog.set_level(logging.DEBUG)
+    early = FakeConnection(peer_id=None)  # o HELLO ainda não identificou o peer
+    await router.on_bad_line(early, ValueError("invalid json"))
+    assert not early.sent  # o ERROR sairia sem dst
+    assert "bad JSON" in caplog.text

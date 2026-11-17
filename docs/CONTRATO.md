@@ -115,7 +115,7 @@ await router.on_bad_line(conn, exc)            # linha que não é JSON: respond
 await router.request(peer_id, msg, timeout=5.0) -> dict | None
 ```
 
-- **A, ao ler o socket:** linha que não decodifica → `await router.on_bad_line(conn, exc)` e **depois** fecha a conexão (especificação, seção Transporte). Linha válida → `await router.on_message(conn, msg)` só depois do HELLO (5.1).
+- **A, ao ler o socket:** linha que não decodifica, **depois do HELLO** → `await router.on_bad_line(conn, exc)` e **depois** fecha a conexão (especificação, seção Transporte). **Antes do HELLO** só fecha a conexão, sem chamar `on_bad_line` (o `conn.peer_id` ainda é `None`; se for chamado mesmo assim, o roteador não envia nada). Linha válida → `await router.on_message(conn, msg)` só depois do HELLO (5.1).
 - **`conn` precisa ter** `peer_id`, `features` (lista) e `async send(msg)`. O roteador não importa `peer_connection`.
 - **`request()` devolve a resposta de mesmo `msg_id` ou um `ERROR`** cujo `ref_msg_id` aponta para ele (o `ERROR` tem `msg_id` novo): quem chama confere `reply["type"]`. O `/games` trata `ERROR` como "sem resposta".
 - **Limite do Rendezvous na CLI:** `/peers` e `/reconnect` dividem um intervalo mínimo de 5 s entre consultas (o limite é de 50 req/min **por IP**, e os peers do `run_local` saem pelo mesmo IP).
@@ -232,6 +232,13 @@ await client.reconcile_now()            # /reconnect: DISCOVER + reconcile imedi
 Em `__init__`/`start()`, nesta ordem: `table = PeerTable()` → `router = MessageRouter(cfg.peer_id, table.send_to)` → `host, player = wire_game(cfg, table, router)` → `PeerServer(cfg, on_message=router.on_message, ...)`. Os callbacks de `table.subscribe` são uma **lista** por evento (o `wire_game` assina `peer_stale` duas vezes: host e jogador).
 
 `stop()` segue a seção 8: `await host.shutdown()` e `await player.leave()` **antes** do `BYE`. O `main` chama `client.stop()` no `finally`, inclusive depois de `Ctrl+C` e de `/quit`.
+
+**Regras que a A precisa seguir** (a C e o `wire_game` dependem delas):
+
+- **`peer_stale` e `peer_gone` só disparam quando o peer fica SEM NENHUMA conexão.** Fechar a conexão duplicada (`BYE reason:"duplicate"`, decisão 1) **não** dispara evento. O `wire_game` trata todo `peer_stale` como queda: o host remove o jogador e o jogador aborta a partida; um disparo falso derrubaria uma partida que está funcionando.
+- **`client.stop()` é seguro mesmo se o `start()` falhou no meio ou foi cancelado** (por exemplo, `Ctrl+C` com o Rendezvous fora do ar): o `main` sempre o chama no `finally`. Em particular, não pode levantar por atributo que o `start()` ainda não criou.
+- **Linha que não é JSON antes do HELLO:** só fecha a conexão, sem `router.on_bad_line` (ver 5.4).
+- O `main` cancela o `client.start()` no primeiro `Ctrl+C`/SIGTERM; o `start()` deve deixar o `CancelledError` propagar (sem engoli-lo em um `except Exception`/`BaseException`).
 
 `PeerConnection` (5.1) precisa expor `peer_id`, `features`, `direction`, `state`, `rtt_ms` e `send`: a CLI e o roteador leem esses atributos.
 

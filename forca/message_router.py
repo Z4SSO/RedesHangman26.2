@@ -43,6 +43,9 @@ class MessageRouter:
         """Linha que não é JSON (a leitura do socket é da A): responde ERROR bad_json.
         Quem chama fecha a conexão depois (especificação, seção Transporte)."""
         log.warning("bad JSON from %s: %s", conn.peer_id, exc)
+        if conn.peer_id is None:  # antes do HELLO: o ERROR sairia sem dst; a A só fecha a conexão
+            log.debug("no ERROR sent: peer not identified yet")
+            return
         await conn.send(self._error(conn, None, p.ErrorCode.BAD_JSON, str(exc)))
 
     # --- entrada ---
