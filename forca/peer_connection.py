@@ -75,6 +75,7 @@ class PeerConnection:
         self._announced = False  # já passou por on_connected?
         self._duplicate_bye = False  # o outro lado nos fechou com BYE "duplicate"
         self._bye_ack = asyncio.Event()  # chegou o BYE_OK que esperamos
+        self._bye_msg_id: str | None = None  # msg_id do BYE que enviamos (o BYE_OK repete)
         self._write_lock = asyncio.Lock()
 
     @property
@@ -182,6 +183,10 @@ class PeerConnection:
                 return None
             if msg is None:
                 return None
+            if msg.get("ttl") != protocol.FIXED_TTL:
+                # ttl != 1: descartada em silêncio (envelope comum) e seguimos esperando
+                log.debug("dropping %s with ttl=%r from %s", msg.get("type"), msg.get("ttl"), self.label)
+                continue
             if msg.get("type") == msg_type and (msg_id is None or msg.get("msg_id") == msg_id):
                 return msg
             log.debug("dropping %s from %s before %s", msg.get("type"), self.label, msg_type)
@@ -202,7 +207,9 @@ class PeerConnection:
             elif type_ == "BYE":
                 await self._on_bye(msg)
             elif type_ == "BYE_OK":
-                self._bye_ack.set()
+                # só vale o BYE_OK do BYE que NÓS enviamos (mesmo msg_id)
+                if self._bye_msg_id is not None and msg.get("msg_id") == self._bye_msg_id:
+                    self._bye_ack.set()
             else:
                 await self._server.on_message(self, msg)
         except Exception:
@@ -250,6 +257,7 @@ class PeerConnection:
             bye = protocol.new_message(
                 "BYE", src=self._server.cfg.peer_id, dst=self.peer_id, reason=reason
             )
+            self._bye_msg_id = bye["msg_id"]
             if await self.send(bye) and wait_ack:
                 try:
                     await asyncio.wait_for(self._bye_ack.wait(), BYE_TIMEOUT)
@@ -336,10 +344,14 @@ class PeerServer:
             return None
         conn = PeerConnection(self, reader, writer, "outbound")
         self._conns.add(conn)
-        if not await self._hello_outbound(conn):
-            await conn._abort()
-            return None
-        kept = await self._establish(conn)
+        try:
+            if not await self._hello_outbound(conn):
+                await conn._abort()
+                return None
+            kept = await self._establish(conn)
+        except asyncio.CancelledError:
+            await conn._abort()  # cancelado no meio do HELLO (ex.: /quit): não deixa o socket aberto
+            raise
         self._spawn(conn._read_loop(), f"read {conn.label}")
         if not kept:
             self._spawn(conn.close("duplicate"), f"close {conn.label}")

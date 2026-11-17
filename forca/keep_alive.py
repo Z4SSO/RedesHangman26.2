@@ -88,7 +88,7 @@ class KeepAlive:
         # deste deixam de contar (um PING mais novo, ainda no ar, continua)
         conn.missed_pings = 0
         w.pending = {mid: t for mid, t in w.pending.items() if t > sent}
-        log.debug("%s RTT=%.1f ms (avg %.1f ms)", conn.peer_id, rtt, conn.rtt_ms)
+        log.info("%s RTT=%.1f ms (avg %.1f ms)", conn.peer_id, rtt, conn.rtt_ms)
 
     async def _ping_loop(self, conn: "PeerConnection", w: _Watch) -> None:
         """Um PING por intervalo. O 1º sai na hora (RTT disponível cedo)."""

@@ -393,3 +393,150 @@ async def test_both_sides_closing_at_the_same_time_do_not_wait_for_bye_ok():
         await asyncio.gather(ca.close("shutdown"), cb.close("shutdown"))
         # cada um recebe o BYE do outro e a conexão fecha: sem esperar os 2 s
         assert asyncio.get_running_loop().time() - started < 1.0
+
+
+async def test_wire_log_includes_the_hello_handshake_and_outbound_message(caplog):
+    caplog.set_level(logging.INFO, logger="PeerServer")
+    caplog.set_level(logging.DEBUG, logger="Wire")  # por último: este também fixa o nível do handler
+    async with Node("alice") as a, Node("bob") as b:
+        await a.connect_to(b)
+        await wait_for(lambda: len(b.connected) == 1)
+    wire = [r.getMessage() for r in caplog.records if r.name == "Wire"]
+    assert any(l.startswith("->") and '"type":"HELLO"' in l for l in wire)
+    assert any(l.startswith("<-") and '"type":"HELLO_OK"' in l for l in wire)
+    assert any(l.startswith("<-") and '"type":"HELLO"' in l for l in wire)  # no lado de bob
+    texts = [r.getMessage() for r in caplog.records if r.name == "PeerServer"]
+    assert any(t == "Outbound connected: bob@CIC (features=hangman)" for t in texts)
+    assert any(t == "Inbound connected: alice@CIC (features=hangman)" for t in texts)
+
+
+# --- correções da revisão contra a especificação -----------------------------
+
+
+async def test_hello_with_wrong_ttl_is_dropped_silently_and_handshake_continues():
+    """ttl != 1 é descartada em silêncio (não fecha a conexão): um HELLO bom depois vale."""
+    async with Node("bob") as b:
+        reader, writer = await raw_connect(b)
+        bad = protocol.new_message("HELLO", peer_id="alice@CIC", version="1.0", features=["hangman"])
+        bad["ttl"] = 5
+        writer.write(protocol.encode(bad))
+        good = protocol.new_message("HELLO", peer_id="alice@CIC", version="1.0", features=["hangman"])
+        writer.write(protocol.encode(good))
+        await writer.drain()
+        ok = await read_msg(reader)
+        assert ok["type"] == "HELLO_OK" and ok["msg_id"] == good["msg_id"]  # respondeu ao bom
+        await wait_for(lambda: len(b.connected) == 1)
+        writer.close()
+
+
+async def test_hello_ok_with_another_msg_id_is_ignored():
+    """O lado que abre só aceita o HELLO_OK que repete o msg_id do seu HELLO."""
+    async def fake_server(reader, writer):
+        hello = json.loads(await reader.readline())
+        wrong = protocol.new_message("HELLO_OK", peer_id="bob@CIC", version="1.0", features=["hangman"])
+        writer.write(protocol.encode(wrong))  # msg_id novo, não o do HELLO
+        await writer.drain()
+        await asyncio.sleep(0.5)
+        right = protocol.reply(hello, "HELLO_OK", peer_id="bob@CIC", version="1.0", features=["hangman"])
+        writer.write(protocol.encode(right))
+        await writer.drain()
+        await asyncio.sleep(0.3)
+        writer.close()
+
+    server = await asyncio.start_server(fake_server, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with Node("alice") as a:
+        conn = await a.server.connect("127.0.0.1", port)
+        assert conn is not None and conn.peer_id == "bob@CIC"  # só o HELLO_OK certo valeu
+    server.close()
+
+
+async def test_connection_without_hello_is_closed_after_the_timeout(monkeypatch):
+    import forca.peer_connection as pc
+    monkeypatch.setattr(pc, "HELLO_TIMEOUT", 0.3)
+    async with Node("bob") as b:
+        reader, writer = await raw_connect(b)  # conecta e não diz nada
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+        assert b.connected == []
+        writer.close()
+
+
+async def test_outbound_connect_fails_when_the_server_never_answers_hello(monkeypatch):
+    import forca.peer_connection as pc
+    monkeypatch.setattr(pc, "HELLO_TIMEOUT", 0.3)
+    server = await asyncio.start_server(lambda r, w: asyncio.sleep(5), "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with Node("alice") as a:
+        assert await a.server.connect("127.0.0.1", port) is None
+    server.close()
+
+
+async def test_message_before_hello_ok_on_outbound_side_is_dropped():
+    async def fake_server(reader, writer):
+        hello = json.loads(await reader.readline())
+        writer.write(protocol.encode(msg(1)))  # mensagem de aplicação ANTES do HELLO_OK
+        writer.write(protocol.encode(protocol.reply(
+            hello, "HELLO_OK", peer_id="bob@CIC", version="1.0", features=["hangman"])))
+        await writer.drain()
+        await asyncio.sleep(0.3)
+        writer.close()
+
+    server = await asyncio.start_server(fake_server, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with Node("alice") as a:
+        conn = await a.server.connect("127.0.0.1", port)
+        assert conn is not None
+        await asyncio.sleep(0.1)
+        assert a.messages == []  # a mensagem antecipada nunca chegou ao roteador
+    server.close()
+
+
+async def test_bye_ok_must_repeat_the_msg_id_of_our_bye(monkeypatch):
+    """Um BYE_OK com outro msg_id não libera a espera do close()."""
+    import forca.peer_connection as pc
+    monkeypatch.setattr(pc, "BYE_TIMEOUT", 0.4)
+    async with Node("bob") as b:
+        reader, writer = await raw_connect(b)
+        await _hello(reader, writer)
+        await wait_for(lambda: len(b.connected) == 1)
+        closing = asyncio.create_task(b.connected[0].close("shutdown"))
+        bye = json.loads(await asyncio.wait_for(reader.readline(), 2))
+        assert bye["type"] == "BYE" and bye["dst"] == "alice@CIC"
+        wrong = protocol.new_message("BYE_OK", src="alice@CIC", dst="bob@CIC")  # msg_id diferente
+        writer.write(protocol.encode(wrong))
+        await writer.drain()
+        started = asyncio.get_running_loop().time()
+        await closing
+        assert asyncio.get_running_loop().time() - started > 0.25  # esperou o timeout inteiro
+        writer.close()
+
+
+async def test_bye_sent_to_the_losing_duplicate_has_reason_duplicate(caplog):
+    caplog.set_level(logging.DEBUG, logger="Wire")
+    async with Node("alice") as a, Node("bob") as b:
+        await asyncio.gather(a.connect_to(b), b.connect_to(a))
+        await asyncio.sleep(0.4)
+        # sem peer_stale falso: cada lado segue com UMA conexão válida
+        assert a.closed == [] and b.closed == []
+    wire = [r.getMessage() for r in caplog.records if r.name == "Wire"]
+    byes = [l for l in wire if l.startswith("->") and '"type":"BYE"' in l]
+    assert byes and all('"reason":"duplicate"' in l for l in byes)  # só a perdedora foi fechada
+    # cada BYE foi respondido com BYE_OK (os dois lados fecham a mesma conexão ao mesmo
+    # tempo, então o BYE_OK pode nem ser lido antes de o socket cair: vale o envio)
+    assert any(l.startswith("->") and '"type":"BYE_OK"' in l for l in wire)
+
+
+async def test_line_of_exactly_32768_bytes_is_accepted_and_longer_is_refused():
+    async with Node("alice") as a, Node("bob") as b:
+        conn = await a.connect_to(b)
+        filler = lambda n: "x" * n  # noqa: E731
+        base = len(protocol.encode(protocol.new_message("GAME_LIST", src="alice@CIC", dst="bob@CIC", pad="")))
+        ok = protocol.new_message("GAME_LIST", src="alice@CIC", dst="bob@CIC",
+                                  pad=filler(protocol.MAX_LINE_BYTES - base))
+        assert len(protocol.encode(ok)) == protocol.MAX_LINE_BYTES
+        assert await conn.send(ok) is True
+        await wait_for(lambda: len(b.messages) == 1)
+        too_big = protocol.new_message("GAME_LIST", src="alice@CIC", dst="bob@CIC",
+                                       pad=filler(protocol.MAX_LINE_BYTES))
+        assert await conn.send(too_big) is False  # encode recusa; send não levanta
+        assert not conn.closed

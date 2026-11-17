@@ -57,4 +57,13 @@ def load_config(path: str | Path | None, overrides: dict[str, Any] | None = None
     if not isinstance(t, int) or isinstance(t, bool) or t < 1:
         raise ValueError(f"turn_timeout must be an integer >= 1, got {t!r}")
 
+    # Estes dois alimentam laços que falam com o Rendezvous, que bloqueia o IP por 1 min
+    # acima de 50 req/min: intervalo zero/negativo ou TTL minúsculo viram um laço sem pausa.
+    d = cfg.discover_interval
+    if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 1:
+        raise ValueError(f"discover_interval must be a number >= 1 (seconds), got {d!r}")
+    ttl = cfg.register_ttl
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl < 2:
+        raise ValueError(f"register_ttl must be a number >= 2 (seconds), got {ttl!r}")
+
     return cfg
