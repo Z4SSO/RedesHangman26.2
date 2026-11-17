@@ -6,6 +6,7 @@ Dono: Pessoa B. Issue 02.1. Regras: especificação, seção "Regras do jogo".
 from __future__ import annotations
 
 import hashlib
+import random
 import unicodedata
 from dataclasses import dataclass
 
@@ -29,6 +30,20 @@ def clean_text(raw: str, max_len: int = 200) -> str:
     espaço, as pontas são aparadas e o resultado é cortado em `max_len`."""
     text = "".join(" " if unicodedata.category(c).startswith("C") else c for c in raw)
     return text.strip()[:max_len]
+
+
+def choose_word(lines) -> str:
+    """Sorteia uma palavra válida (regra 2) de `lines`; linhas inválidas são puladas.
+    ValueError se não sobrar nenhuma."""
+    words = []
+    for line in lines:
+        try:
+            words.append(normalize_word(line))
+        except ValueError:
+            continue
+    if not words:
+        raise ValueError("no valid words (a-z, 3 to 20 letters)")
+    return random.choice(words)
 
 
 def word_hash(normalized_word: str) -> str:

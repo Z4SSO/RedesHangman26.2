@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import random
 import sys
 import threading
 import time
@@ -19,7 +18,7 @@ from typing import Awaitable, Callable
 
 from . import protocol as p
 from .protocol import CHAT_MAX_LEN
-from .hangman import normalize_word
+from .hangman import choose_word, normalize_word
 from .models import PlayerState
 from .rendezvous_connection import RendezvousError
 
@@ -265,15 +264,10 @@ class CLI:
         path = Path(self.client.cfg.words_file)
 
         def pick() -> str:
-            words = []
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    words.append(normalize_word(line))
-                except ValueError:
-                    continue  # linha vazia ou palavra fora da regra 2
-            if not words:
-                raise UsageError(f"{path} não tem palavras válidas (a-z, 3 a 20 letras).")
-            return random.choice(words)
+            try:
+                return choose_word(path.read_text(encoding="utf-8").splitlines())
+            except ValueError:
+                raise UsageError(f"{path} não tem palavras válidas (a-z, 3 a 20 letras).") from None
 
         try:
             return await asyncio.to_thread(pick)

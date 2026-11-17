@@ -27,6 +27,7 @@ class Config:
     turn_timeout: int = 30
     words_file: str = "words.txt"
     log_file: str | None = None
+    host_migration: bool = False  # bônus 05.1; desligado, a queda do host aborta a partida (cenário 9)
 
     @property
     def peer_id(self) -> str:
@@ -56,6 +57,9 @@ def load_config(path: str | Path | None, overrides: dict[str, Any] | None = None
     t = cfg.turn_timeout
     if not isinstance(t, int) or isinstance(t, bool) or t < 1:
         raise ValueError(f"turn_timeout must be an integer >= 1, got {t!r}")
+
+    if not isinstance(cfg.host_migration, bool):
+        raise ValueError(f"host_migration must be true or false, got {cfg.host_migration!r}")
 
     # Estes dois alimentam laços que falam com o Rendezvous, que bloqueia o IP por 1 min
     # acima de 50 req/min: intervalo zero/negativo ou TTL minúsculo viram um laço sem pausa.

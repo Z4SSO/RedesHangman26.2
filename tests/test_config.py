@@ -40,3 +40,11 @@ def test_intervals_that_would_hammer_the_rendezvous_are_refused(tmp_path, key, v
 def test_default_intervals_are_valid():
     cfg = load_config(None)
     assert cfg.discover_interval >= 1 and cfg.register_ttl >= 2
+
+
+@pytest.mark.parametrize("bad", [1, 0, "true", "sim"])
+def test_host_migration_must_be_a_boolean(bad):
+    assert load_config(None).host_migration is False  # padrão: cenário 9 como na especificação
+    assert load_config(None, {"host_migration": True}).host_migration is True
+    with pytest.raises(ValueError, match="host_migration"):
+        load_config(None, {"host_migration": bad})
