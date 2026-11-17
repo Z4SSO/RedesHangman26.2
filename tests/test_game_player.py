@@ -78,6 +78,17 @@ async def test_game_start_and_state_make_playing(player):
     assert player.state == PlayerState.PLAYING and player.seq == 1 and player.lives == 6
 
 
+async def test_no_turn_prompt_on_a_final_state(player, caplog):
+    caplog.set_level(logging.INFO)
+    await playing(player)
+    caplog.clear()
+    await player.on_state(None, state(2, masked="banana"))  # palavra completa, turno ainda meu
+    await player.on_state(None, state(3, masked="b_____", lives=0))  # sem vidas
+    assert "É a sua vez" not in caplog.text
+    await player.on_state(None, state(4, masked="b_____", lives=3))
+    assert "É a sua vez" in caplog.text
+
+
 async def test_old_or_repeated_seq_is_discarded(player, caplog):
     caplog.set_level(logging.DEBUG)
     await playing(player)

@@ -188,7 +188,7 @@ class GamePlayer:
             what =f"letter={last['letter']}" if "letter" in last else (
                 f"word={last['word']}" if "word" in last else "timeout")
             game_log.info("%s: %s", last.get("player"), what)
-        if mine:
+        if mine and self.lives > 0 and "_" in self.masked:  # STATE final (host de terceiros): GAME_OVER vem a seguir
             game_log.info("É a sua vez! Use /guess <letra> ou /word <palavra>")
 
     async def on_guess_result(self, conn, msg: dict) -> None:
