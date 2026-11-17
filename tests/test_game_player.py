@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from types import SimpleNamespace
 
@@ -354,3 +355,122 @@ async def test_full_game_win_between_host_and_two_players():
     assert {m["winner"] for m in over} == {"bob@CIC"}
     assert over[0]["scores"] == {"bob@CIC": 2, "carol@CIC": 2}
     await alice.host.shutdown()
+
+
+# --- bônus 05.1: migração de host ---
+
+from forca import game_player  # noqa: E402
+
+
+def migrating(name, players, enabled=True):
+    sender = FakeSender()
+    pl = GamePlayer(Config(name=name, namespace="CIC", host_migration=enabled), sender)
+    pl.taken = []
+
+    async def take(gid, others, lives):
+        pl.taken.append((gid, others, lives))
+
+    pl.on_migrate = take
+    return pl, sender
+
+
+async def playing_as(pl, me, players, lives=6):
+    def msg(type_, **f):
+        return incoming(type_, HOST, me, game_id=GID, **f)
+
+    await pl.join(HOST, GID)
+    await pl.on_join_ok(None, msg("JOIN_OK", players=[me], rejoin=False))
+    await pl.on_game_start(None, msg("GAME_START", players=players, lives=6, word_length=6,
+                                     word_hash=word_hash("banana"), turn_timeout=30))
+    await pl.on_state(None, msg("STATE", seq=1, masked="______", wrong_letters=[], lives=lives,
+                                turn=players[0], players=players, last_guess=None))
+
+
+PLAYERS = ["bob@CIC", "carol@CIC", "dave@CIC"]
+
+
+async def test_smallest_peer_id_takes_over_with_the_last_state_lives():
+    pl, _ = migrating("bob", PLAYERS)
+    await playing_as(pl, "bob@CIC", PLAYERS, lives=4)
+    await pl.on_peer_stale(HOST)
+    assert pl.taken == [(GID, ["carol@CIC", "dave@CIC"], 4)]
+    assert not pl.active  # liberado para virar host (busy)
+
+
+async def test_other_players_wait_for_the_successor(caplog):
+    caplog.set_level(logging.INFO)
+    pl, _ = migrating("dave", PLAYERS)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_peer_stale(HOST)
+    assert pl.active and pl.host_id == "bob@CIC" and not pl.taken
+    assert f"Host {HOST} unreachable — waiting for new host bob@CIC" in caplog.text
+    pl._clear()  # cancela o timer
+
+
+async def test_successor_game_start_resumes_and_cancels_the_timeout(monkeypatch):
+    monkeypatch.setattr(game_player, "MIGRATION_TIMEOUT", 0.05)
+    pl, _ = migrating("dave", PLAYERS)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_peer_stale(HOST)
+    await pl.on_game_start(None, incoming(
+        "GAME_START", "bob@CIC", "dave@CIC", game_id=GID, players=["carol@CIC", "dave@CIC"], lives=4,
+        word_length=4, word_hash=word_hash("casa"), turn_timeout=30))
+    await pl.on_state(None, incoming(
+        "STATE", "bob@CIC", "dave@CIC", game_id=GID, seq=1, masked="____", wrong_letters=[], lives=4,
+        turn="carol@CIC", players=["carol@CIC", "dave@CIC"], last_guess=None))
+    await asyncio.sleep(0.15)  # passou do timeout: não pode abortar
+    assert pl.active and (pl.host_id, pl.seq, pl.lives, pl.masked) == ("bob@CIC", 1, 4, "____")
+
+
+async def test_no_game_start_from_the_successor_aborts_after_the_timeout(monkeypatch, caplog):
+    monkeypatch.setattr(game_player, "MIGRATION_TIMEOUT", 0.05)
+    pl, _ = migrating("dave", PLAYERS)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_peer_stale(HOST)
+    await asyncio.sleep(0.15)
+    assert not pl.active and "did not start the game — game aborted" in caplog.text
+
+
+async def test_game_start_arriving_before_we_notice_the_host_is_down():
+    pl, _ = migrating("dave", PLAYERS)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_game_start(None, incoming(
+        "GAME_START", "bob@CIC", "dave@CIC", game_id=GID, players=["carol@CIC", "dave@CIC"], lives=5,
+        word_length=4, word_hash=word_hash("casa"), turn_timeout=30))
+    assert pl.host_id == "bob@CIC" and pl.lives == 5 and pl.masked == "____"
+    await pl.on_peer_stale(HOST)  # a queda do host antigo chega depois: já não é o nosso host
+    assert pl.active and pl.host_id == "bob@CIC"
+
+
+async def test_game_start_from_someone_who_is_not_the_successor_is_rejected():
+    pl, sender = migrating("dave", PLAYERS)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_game_start(None, incoming(
+        "GAME_START", "carol@CIC", "dave@CIC", game_id=GID, players=["dave@CIC"], lives=1,
+        word_length=4, word_hash=word_hash("casa"), turn_timeout=30))
+    assert pl.host_id == HOST and pl.lives == 6
+    assert sender.of_type("ERROR")[-1]["code"] == "invalid_state"
+
+
+async def test_without_two_players_left_or_with_the_flag_off_the_game_aborts_as_before():
+    pl, _ = migrating("bob", ["bob@CIC"])  # sozinho
+    await playing_as(pl, "bob@CIC", ["bob@CIC"])
+    await pl.on_peer_stale(HOST)
+    assert not pl.active and not pl.taken
+
+    off, _ = migrating("bob", PLAYERS, enabled=False)
+    await playing_as(off, "bob@CIC", PLAYERS)
+    await off.on_peer_stale(HOST)
+    assert not off.active and not off.taken
+
+
+async def test_a_failing_takeover_aborts_without_crashing(caplog):
+    pl, _ = migrating("bob", PLAYERS)
+
+    async def boom(*a):
+        raise OSError("sem words.txt")
+
+    pl.on_migrate = boom
+    await playing_as(pl, "bob@CIC", PLAYERS)
+    await pl.on_peer_stale(HOST)
+    assert not pl.active and "Could not take over the game" in caplog.text

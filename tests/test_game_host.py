@@ -613,3 +613,23 @@ async def test_shutdown_cancels_the_timer_that_is_still_broadcasting():
         assert not [t for t in asyncio.all_tasks() if "GameHost._turn_timer" in repr(t)]
     finally:
         s.release.set()
+
+
+# --- bônus 05.1: assumir a partida de um host que caiu ---
+
+
+async def test_adopt_keeps_game_id_lives_and_starts_with_a_new_word(host, sender):
+    await host.adopt("alice@CIC/antigo", ["carol@CIC", "dave@CIC"], "casa", 4)
+    assert host.game_id == "alice@CIC/antigo" and host.status == GameStatus.RUNNING
+    starts = sender.of_type("GAME_START")
+    assert sorted(m["dst"] for m in starts) == ["carol@CIC", "dave@CIC"]
+    assert all(m["game_id"] == "alice@CIC/antigo" and m["lives"] == 4 and m["word_length"] == 4
+               and m["word_hash"] == word_hash("casa") for m in starts)
+    first = sender.of_type("STATE")[0]
+    assert first["seq"] == 1 and first["lives"] == 4 and first["turn"] == "carol@CIC"
+
+
+async def test_adopt_refuses_when_already_in_a_game(host):
+    await host.create("casa")
+    with pytest.raises(RuntimeError):
+        await host.adopt("x@CIC/1", ["carol@CIC"], "casa", 6)

@@ -99,6 +99,20 @@ class GameHost:
         )
         return self.game_id
 
+    async def adopt(self, game_id: str, players: list[str], word: str, lives: int) -> None:
+        """Bônus 05.1: assume a partida de um host que caiu. Mesmo `game_id`, palavra nova
+        (a original só o host antigo conhecia) e as vidas do último STATE; já inicia."""
+        if self.active or self.busy():
+            raise RuntimeError("already in a game")
+        game = Hangman(word, lives)
+        self._cancel_expire()
+        self._reset()
+        self._game, self.game_id, self.status = game, game_id, GameStatus.OPEN
+        self._players, self._max_players = list(players), max(len(players), 1)
+        log.info("Game %s adopted as new host (word_length=%d, lives=%d, players=%d)",
+                 game_id, game.word_length, game.lives, len(players))
+        await self.start()
+
     async def start(self) -> None:
         """OPEN -> RUNNING. Exige >=1 jogador. Envia GAME_START e STATE seq=1."""
         if self.status != GameStatus.OPEN:

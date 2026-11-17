@@ -6,9 +6,10 @@ Dono: Pessoa B. Issue 02.6. Logger: "Player" (linhas da especificação) e "Game
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from typing import Callable
+from typing import Awaitable, Callable
 
 from . import protocol as p
 from .config import Config
@@ -21,6 +22,8 @@ game_log = logging.getLogger("Game")
 # shortcut: valor escolhido no olho (4 ciclos de PING de 30 s), não vem da especificação;
 # ajustar se o cliente de referência demorar mais que isso para voltar.
 REJOIN_WINDOW = 120.0
+# shortcut: idem; quanto o jogador espera o GAME_START do novo host antes de abortar (bônus 05.1).
+MIGRATION_TIMEOUT = 30.0
 
 
 class GamePlayer:
@@ -32,9 +35,15 @@ class GamePlayer:
         self.busy = busy
         # (host, game_id, campos do GAME_START, instante da queda) guardados para o rejoin
         self._last_game: tuple[str, str, dict, float] | None = None
+        # Bônus 05.1: `async (game_id, outros_jogadores, vidas)`; quem liga define (wire_game).
+        self.on_migrate: Callable[[str, list[str], int], Awaitable[None]] | None = None
+        self._migration_task: asyncio.Task | None = None
         self._clear()
 
     def _clear(self) -> None:
+        task, self._migration_task = self._migration_task, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
         self.state = PlayerState.IDLE
         self.host_id: str | None = None
         self.game_id: str | None = None
@@ -173,13 +182,27 @@ class GamePlayer:
     async def on_leave_ok(self, conn, msg: dict) -> None:
         log.debug("LEAVE_OK from %s", msg.get("src"))
 
+    def _successor(self, old_host: str | None) -> str | None:
+        """Bônus 05.1: menor peer_id entre os jogadores do último STATE, sem o host antigo."""
+        rest = [pl for pl in self.players if pl != old_host]
+        return min(rest) if len(rest) >= 2 else None  # sozinho não há partida
+
     async def on_game_start(self, conn, msg: dict) -> None:
+        if (self.cfg.host_migration and self.state == PlayerState.PLAYING
+                and msg.get("game_id") == self.game_id and msg.get("src") != self.host_id
+                and msg.get("src") == self._successor(self.host_id)):
+            log.info("New host %s took over game %s", msg["src"], self.game_id)
+            self.host_id = msg["src"]  # a queda do host antigo ainda não chegou até nós
         if not self._mine(msg):
             return await self._invalid_state(msg)
         length = msg["word_length"]
         if not (isinstance(length, int) and MIN_WORD <= length <= MAX_WORD):
             log.warning("GAME_START ignored: word_length=%r out of range", length)
             return
+        if self._migration_task is not None:  # era o GAME_START que esperávamos
+            self._migration_task.cancel()
+            self._migration_task = None
+            log.info("New host %s took over game %s", self.host_id, self.game_id)
         self.word_hash = msg["word_hash"]
         self.lives = self.lives_total = msg["lives"]
         self.players = list(msg["players"])
@@ -249,6 +272,8 @@ class GamePlayer:
         """Se for o host: '[Game] Host X unreachable — game aborted', volta a IDLE."""
         if not self.active or peer_id != self.host_id:
             return
+        if self.cfg.host_migration and self.state == PlayerState.PLAYING and await self._migrate(peer_id):
+            return
         if self.state == PlayerState.PLAYING:
             self._last_game = (self.host_id, self.game_id, {  # rejoin se o host voltar
                 "word_hash": self.word_hash, "lives_total": self.lives_total,
@@ -257,6 +282,38 @@ class GamePlayer:
         log.warning("Host %s unreachable — game aborted", peer_id)
         game_log.warning("Host %s unreachable — game aborted", peer_id)
         self._clear()
+
+    async def _migrate(self, old_host: str) -> bool:
+        """Bônus 05.1. True se a partida continua sem o host antigo (eu assumo ou espero o
+        sucessor); False cai no aborto de sempre (sobrou menos de 2 jogadores)."""
+        new_host = self._successor(old_host)
+        if new_host is None:
+            return False
+        if new_host != self.cfg.peer_id:
+            game_log.warning("Host %s unreachable — waiting for new host %s", old_host, new_host)
+            self.host_id = new_host
+            if self._migration_task is not None:  # o sucessor também caiu: recomeça a espera
+                self._migration_task.cancel()
+            self._migration_task = asyncio.create_task(self._migration_timeout(self.game_id))
+            return True
+        if self.on_migrate is None:
+            return False
+        game_id, lives = self.game_id, self.lives
+        others = [pl for pl in self.players if pl not in (old_host, self.cfg.peer_id)]
+        game_log.warning("Host %s unreachable — I am the new host", old_host)
+        self._clear()  # libera o peer para virar host (busy)
+        try:
+            await self.on_migrate(game_id, others, lives)
+        except Exception:
+            log.exception("could not take over game %s", game_id)
+            game_log.warning("Could not take over the game — game aborted")
+        return True
+
+    async def _migration_timeout(self, game_id: str | None) -> None:
+        await asyncio.sleep(MIGRATION_TIMEOUT)
+        if self.game_id == game_id and self.active:
+            game_log.warning("New host %s did not start the game — game aborted", self.host_id)
+            self._clear()
 
     async def on_peer_connected(self, peer_id: str) -> None:
         """Reenvia JOIN ao host que voltou numa partida em andamento (rejoin)."""
