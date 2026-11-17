@@ -229,6 +229,29 @@ Quem cria uma partida ou entra em uma verifica `not (host.active or player.activ
 
 Para B conseguir olhar o outro objeto sem importá-lo, **quem liga os objetos (C) passa `busy`**: `host = GameHost(cfg, send, busy=lambda: player.active)` e `player = GamePlayer(cfg, send, busy=lambda: host.active)`. `GameHost.create` e `GamePlayer.join` levantam `RuntimeError` se `self.active or busy()`. Sem o `busy`, a defesa só olha o próprio objeto.
 
+### 5.9 `P2PClient` (A + C)
+
+```python
+client = P2PClient(cfg, wire=None)      # wire(client) é escrita pela C (ligação do jogo)
+await client.start()                    # wire -> PeerServer.start -> REGISTER -> tarefas periódicas
+await client.stop()                     # encerramento da seção 8; idempotente
+await client.wait_stopped()             # termina quando o stop() acabou
+client.install_signal_handlers()        # Ctrl+C / SIGTERM disparam o mesmo stop()
+await client.reconnect_now() -> bool    # /reconnect: DISCOVER + reconcile + table.retry_now(); no máx. 1 a cada 5 s
+```
+
+**O `P2PClient` cria todos os objetos e os expõe** (a CLI da C usa só estes): `client.cfg`, `client.rdv` (`.public_ip`), `client.server`, `client.table`, `client.keep_alive`, `client.router`, `client.host`, `client.player`. `host` e `player` já vêm criados com `send = table.send_to` e o `busy` cruzado (seção 5.8). `client.cfg.listen_port` é a porta real mesmo se o config pedir 0.
+
+**Ligações de rede (A, já feitas dentro do `P2PClient`):** `server.on_message → router.on_message`; `server.on_connected → keep_alive.watch + table.attach`; `server.on_closed → table.detach`; `server.on_pong → keep_alive.on_pong`; `table` usa `server.connect`.
+
+**Ligações do jogo (C): a função `wire(client)`**, chamada **uma vez, no início do `start()`** (antes de o servidor escutar, para nenhuma mensagem chegar sem handler). Ela deve:
+1. registrar no `client.router` os handlers da tabela da seção 5.4 (`GameHost.on_*`, `GamePlayer.on_*`);
+2. assinar na `client.table` os eventos: `peer_stale` e `peer_gone` → `host.on_peer_stale` e `player.on_peer_stale`; `peer_connected` → `player.on_peer_connected`.
+
+`main.py` (C): `client = P2PClient(cfg, wire=wire)`, `await client.start()`, `client.install_signal_handlers()`, roda a CLI e, ao fim, `await client.wait_stopped()`. O `/quit` chama `await client.stop()`.
+
+**Tarefas periódicas:** `DISCOVER` a cada `discover_interval` (o primeiro logo após o `REGISTER`) e refresh do registro a cada `register_ttl / 2`. Em `peer_not_registered`: `REGISTER` de novo e repete o `DISCOVER` uma vez (6.9). Se o `DISCOVER` falhar por qualquer motivo, a tabela **não** é reconciliada (senão todos virariam `GONE` por uma falha do servidor). Nenhum laço roda sem `asyncio.sleep`, nem quando dá erro: com os padrões são ≈ 3 req/min por peer. Rendezvous fora do ar não derruba o peer: ele sobe, avisa no log e tenta registrar de novo a cada intervalo.
+
 ## 6. Decisões já tomadas (onde a especificação deixa margem)
 
 Se o professor responder diferente, altere aqui e avise.
@@ -275,6 +298,7 @@ Na tela: `INFO` ou acima, mais tudo de `CLI` e `Game`. No arquivo (`--log-file`)
 
 ## 8. Ordem de encerramento (`/quit`)
 
+0. Cancela as tarefas periódicas (nenhum `DISCOVER` ou refresh no meio do encerramento).
 1. Se for host com partida ativa: `GAME_OVER ABORTED` (`reason: host_shutdown`) a todos os jogadores.
 2. Se for jogador em partida: `LEAVE` ao host.
 3. `BYE` a todos os vizinhos; aguarda `BYE_OK` até 2 s por conexão.

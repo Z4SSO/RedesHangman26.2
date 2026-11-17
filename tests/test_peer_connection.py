@@ -340,3 +340,14 @@ async def test_reconnect_from_same_direction_replaces_old_connection():
         assert second is not None
         await wait_for(lambda: first.closed)
         assert b.server._by_peer["alice@CIC"] is not None
+
+
+async def test_both_sides_closing_at_the_same_time_do_not_wait_for_bye_ok():
+    async with Node("alice") as a, Node("bob") as b:
+        ca = await a.connect_to(b)
+        await wait_for(lambda: len(b.connected) == 1)
+        cb = b.connected[0]
+        started = asyncio.get_running_loop().time()
+        await asyncio.gather(ca.close("shutdown"), cb.close("shutdown"))
+        # cada um recebe o BYE do outro e a conexão fecha: sem esperar os 2 s
+        assert asyncio.get_running_loop().time() - started < 1.0

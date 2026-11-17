@@ -252,6 +252,9 @@ class PeerConnection:
             return
         self.closed = True
         self.state = PeerState.STALE
+        # quem espera o BYE_OK num close() não precisa esperar mais: a conexão
+        # acabou (ex.: os dois lados se encerram ao mesmo tempo e trocam BYEs)
+        self._bye_ack.set()
         self._writer.close()
         try:
             await asyncio.wait_for(self._writer.wait_closed(), CLOSE_TIMEOUT)
