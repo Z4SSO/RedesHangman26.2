@@ -18,8 +18,14 @@ COMMANDS = (
 
 
 class CLI:
-    def __init__(self, client) -> None:
+    def __init__(self, client, set_log_level=None) -> None:
+        """`set_log_level(nome)` troca o nível da tela (injetado pelo main)."""
         self.client = client
+        self.set_log_level = set_log_level
+
+    def request_quit(self) -> None:
+        """Ctrl+C / SIGTERM: mesmo caminho do /quit."""
+        raise NotImplementedError("issue 03.3")
 
     async def run(self) -> None:
         """Laço de leitura e despacho dos comandos até /quit."""

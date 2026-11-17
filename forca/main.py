@@ -8,10 +8,34 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
+import sys
+from pathlib import Path
 
-from .config import load_config
+from .cli import CLI
+from .config import Config, load_config
+from .p2p_client import P2PClient
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s [%(name)s] %(message)s"
+SCREEN_ALWAYS = frozenset({"CLI", "Game"})  # mensagens ao usuário: aparecem em qualquer nível
+LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+log = logging.getLogger("CLI")
+
+
+def parse_level(name: str) -> int:
+    """'debug' -> logging.DEBUG. ValueError se não for um dos quatro níveis."""
+    if name.upper() not in LEVELS:
+        raise ValueError(f"nível inválido {name!r}; use {', '.join(LEVELS)}")
+    return getattr(logging, name.upper())
+
+
+def _level_arg(name: str) -> str:
+    try:
+        parse_level(name)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+    return name.upper()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -23,21 +47,105 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--rdv-host", dest="rdv_host")
     ap.add_argument("--rdv-port", type=int, dest="rdv_port")
     ap.add_argument("--log-file", dest="log_file")
-    ap.add_argument("--log-level", default="INFO")
+    ap.add_argument("--log-level", default="INFO", type=_level_arg, help="nível mostrado na tela")
     return ap.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
+# --- configuração ---
+
+
+def build_config(args: argparse.Namespace) -> Config:
+    """Linha de comando > config.json > padrão. ValueError se algo for inválido."""
     cfg = load_config(
         args.config,
         {k: getattr(args, k) for k in
          ("name", "namespace", "listen_port", "rdv_host", "rdv_port", "log_file")},
     )
-    # TODO(issue 03.1): configurar logging (tela: INFO, [CLI] e [Game];
-    # arquivo: tudo, incluindo DEBUG), criar P2PClient + CLI e rodar o loop.
-    logging.basicConfig(level=args.log_level, format=LOG_FORMAT)
-    raise NotImplementedError(f"issue 03.1 (peer {cfg.peer_id})")
+    for field in ("listen_port", "rdv_port"):
+        port = getattr(cfg, field)
+        if not (isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535):
+            raise ValueError(f"{field} deve estar entre 1 e 65535, recebi {port!r}")
+    return cfg
+
+
+# --- logging ---
+
+
+class ScreenFilter(logging.Filter):
+    """Tela: o nível escolhido ou acima, mais tudo de [CLI] e [Game] (contrato, seção 7)."""
+
+    def __init__(self, level: int = logging.INFO) -> None:
+        super().__init__()
+        self.level = level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= self.level or record.name in SCREEN_ALWAYS
+
+    def set_level(self, name: str) -> None:
+        """Troca o nível da tela em tempo de execução (o `/log` da CLI chama isto)."""
+        self.level = parse_level(name)
+
+
+def setup_logging(screen_level: str = "INFO") -> ScreenFilter:
+    """Raiz em DEBUG; a tela filtra. O arquivo (`add_log_file`) recebe tudo."""
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    screen = ScreenFilter(parse_level(screen_level))
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.addFilter(screen)
+    root.addHandler(handler)
+    return screen
+
+
+def add_log_file(path: str) -> logging.Handler:
+    """Arquivo com TUDO: DEBUG e o logger Wire com o JSON bruto. OSError se não abrir."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logging.getLogger().addHandler(handler)
+    return handler
+
+
+# --- execução ---
+
+
+async def run(cfg: Config, screen: ScreenFilter) -> None:
+    """Sobe o cliente e a CLI; Ctrl+C e SIGTERM seguem o mesmo caminho do /quit."""
+    client = P2PClient(cfg)
+    cli = CLI(client, screen.set_level)
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, cli.request_quit)
+        except NotImplementedError:  # Windows
+            pass
+    try:
+        await client.start()
+        await cli.run()
+    finally:
+        try:
+            await client.stop()
+        except Exception:
+            log.exception("erro ao encerrar")
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    screen = setup_logging(args.log_level)
+    try:
+        cfg = build_config(args)
+        if cfg.log_file:
+            add_log_file(cfg.log_file)
+    except (ValueError, OSError) as exc:  # JSONDecodeError é ValueError
+        log.error("configuração inválida: %s", exc)
+        raise SystemExit(2) from None
+    try:
+        asyncio.run(run(cfg, screen))
+    except OSError as exc:  # ex.: porta de escuta em uso
+        log.error("não foi possível iniciar: %s", exc)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
