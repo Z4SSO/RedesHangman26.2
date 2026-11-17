@@ -21,6 +21,7 @@ class FakeRdv:
         self.requests: list[str] = []  # tipo de cada requisição, na ordem
         self.events: list[str] = []  # linha do tempo compartilhada com os testes
         self.fail_all = False  # responde ERROR a tudo
+        self.fake_public_ip = None  # IP "público" divulgado no lugar do real (simula NAT)
         self.server = None
         self.port = 0
 
@@ -30,7 +31,7 @@ class FakeRdv:
 
     async def _handle(self, reader, writer):
         req = json.loads(await reader.readline())
-        ip = writer.get_extra_info("peername")[0]
+        ip = self.fake_public_ip or writer.get_extra_info("peername")[0]
         self.requests.append(req["type"])
         if self.fail_all:
             resp = {"status": "ERROR", "message": "bad_port"}
@@ -338,3 +339,38 @@ async def test_start_cancelled_propagates_cancelled_error_and_stop_is_safe():
         assert leftover == []  # nenhuma tarefa do cliente sobrou
     finally:
         server.close()
+
+
+# --- peers atrás do mesmo IP público (NAT sem hairpin) -----------------------------
+
+
+async def test_neighbors_sharing_my_public_ip_are_reached_through_loopback():
+    """O Rendezvous divulga o IP público; se ele é o mesmo, tenta 127.0.0.1 primeiro.
+    203.0.113.7 (documentação) não é alcançável: sem a regra, a conexão travaria."""
+    async with FakeRdv() as rdv:
+        rdv.fake_public_ip = "203.0.113.7"
+        started = asyncio.get_running_loop().time()
+        a, b = await start_all(rdv, "alice", "bob")
+        await until(lambda: len(a.table.connected()) == 1 and len(b.table.connected()) == 1, timeout=4)
+        assert asyncio.get_running_loop().time() - started < 4  # sem esperar o timeout de 5 s
+        assert [c.peer_id for c in a.table.connected()] == ["bob@CIC"]
+        await stop_all(a, b)
+
+
+async def test_different_public_ip_does_not_try_loopback():
+    async with FakeRdv() as rdv:
+        (c,) = await start_all(rdv, "alice")
+        calls = []
+
+        async def spy(ip, port):
+            calls.append((ip, port))
+            return None
+
+        c.server.connect = spy
+        c.rdv.public_ip = "203.0.113.7"
+        await c._connect("198.51.100.9", 8082)  # outro IP: caminho normal
+        assert calls == [("198.51.100.9", 8082)]
+        calls.clear()
+        await c._connect("203.0.113.7", 8082)  # mesmo IP público: loopback primeiro, depois o IP
+        assert calls == [("127.0.0.1", 8082), ("203.0.113.7", 8082)]
+        await c.stop()

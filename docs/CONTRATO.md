@@ -277,6 +277,8 @@ Em `__init__`, nesta ordem: `table = PeerTable(cfg, connect_fn)` (5.2) → `rout
 
 **Início e tarefas periódicas (A):** `start()` faz `PeerServer.start` → `REGISTER` → tarefas. `DISCOVER` a cada `discover_interval` (o primeiro logo após o `REGISTER`) e refresh do registro a cada `register_ttl / 2`. Em `peer_not_registered`: `REGISTER` de novo e repete o `DISCOVER` uma vez (6.9). Se o `DISCOVER` falhar por qualquer motivo, a tabela **não** é reconciliada (senão todos virariam `GONE` por uma falha do servidor). Nenhum laço roda sem `asyncio.sleep`, nem quando dá erro: com os padrões são ≈ 3 req/min por peer. Rendezvous fora do ar não derruba o peer: ele sobe, avisa no log e tenta registrar de novo a cada intervalo. `client.cfg.listen_port` é a porta real mesmo se o config pedir 0.
 
+**Vizinho com o mesmo IP público que o meu:** o Rendezvous divulga o IP público de cada peer, e muitos roteadores não deixam alcançar o próprio IP público por dentro (sem *hairpin NAT*). Se `neighbor.ip == client.rdv.public_ip`, o `P2PClient` tenta `127.0.0.1:porta` primeiro e só depois o IP divulgado. Assim 3 peers na mesma máquina fecham a malha usando o servidor público.
+
 **Sinais:** quem instala os handlers de `Ctrl+C`/SIGTERM é o `main.py` (C); o `P2PClient` não trata sinais, só expõe `stop()`.
 
 ## 6. Decisões já tomadas (onde a especificação deixa margem)

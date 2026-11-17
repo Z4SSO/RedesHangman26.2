@@ -57,7 +57,21 @@ class P2PClient:
     # --- ligações de rede ----------------------------------------------------
 
     async def _connect(self, ip: str, port: int) -> PeerConnection | None:
-        """`connect_fn` da PeerTable (o servidor é criado depois da tabela)."""
+        """`connect_fn` da PeerTable (o servidor é criado depois da tabela).
+
+        O Rendezvous divulga o IP PÚBLICO de cada peer. Se o vizinho tem o mesmo
+        IP público que eu, ele está atrás do mesmo roteador (ou na mesma máquina) e
+        muitos roteadores não deixam alcançar o próprio IP público por dentro
+        (falta de "hairpin NAT"): conectar nele falha ou trava até o timeout. Por
+        isso tento o `127.0.0.1` primeiro: se o vizinho está na mesma máquina,
+        conecta na hora; se está em outra máquina da mesma rede, recusa na hora e
+        cai no caminho normal. O HELLO confirma quem atendeu.
+        """
+        if self.rdv.public_ip is not None and ip == self.rdv.public_ip:
+            log.info("%s:%s shares my public IP; trying 127.0.0.1:%s first", ip, port, port)
+            conn = await self.server.connect("127.0.0.1", port)
+            if conn is not None:
+                return conn
         return await self.server.connect(ip, port)
 
     async def _on_connected(self, conn: PeerConnection) -> None:
