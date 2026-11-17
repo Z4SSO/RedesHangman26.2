@@ -117,6 +117,8 @@ await router.request(peer_id, msg, timeout=5.0) -> dict | None
 
 - **A, ao ler o socket:** linha que não decodifica → `await router.on_bad_line(conn, exc)` e **depois** fecha a conexão (especificação, seção Transporte). Linha válida → `await router.on_message(conn, msg)` só depois do HELLO (5.1).
 - **`conn` precisa ter** `peer_id`, `features` (lista) e `async send(msg)`. O roteador não importa `peer_connection`.
+- **`request()` devolve a resposta de mesmo `msg_id` ou um `ERROR`** cujo `ref_msg_id` aponta para ele (o `ERROR` tem `msg_id` novo): quem chama confere `reply["type"]`. O `/games` trata `ERROR` como "sem resposta".
+- **Limite do Rendezvous na CLI:** `/peers` e `/reconnect` dividem um intervalo mínimo de 5 s entre consultas (o limite é de 50 req/min **por IP**, e os peers do `run_local` saem pelo mesmo IP).
 - **Anti-spoof (decisão 21):** mensagem com `src` diferente do `conn.peer_id` é descartada com WARNING, sem resposta. Sem isso qualquer vizinho conectado jogaria no lugar de outro. Uma resposta de `request()` também só vale se vier do peer para quem foi enviada.
 
 `request()` envia e espera a resposta de **mesmo `msg_id`**; usado por `/games` (GAME_LIST → GAME_LIST_OK) e `/join` (JOIN → JOIN_OK/JOIN_ERR). Uma resposta casada com um `request` pendente **não** vai para os handlers.
