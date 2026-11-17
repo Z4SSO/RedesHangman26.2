@@ -102,7 +102,7 @@ await rdv.discover(namespace=None) -> list[dict]   # SEM o próprio peer
 await rdv.unregister() -> None
 ```
 
-Lança `RendezvousError(message)` quando `status == "ERROR"`. Uma conexão TCP por comando. Intervalo mínimo entre chamadas: o `discover_interval` (nunca em laço sem pausa: o servidor bloqueia o IP por 1 min acima de 50 req/min).
+`RendezvousConnection(cfg, timeout=5.0)`. Lança `RendezvousError` com `.message` igual ao `message` do servidor quando `status == "ERROR"` (ex.: `peer_not_registered`, texto do bloqueio). Falhas de rede também viram `RendezvousError`, com `.message` `"timeout"`, `"connection_failed"` ou `"bad_response"`, para quem chama tratar um tipo só. Conectar e ler a resposta têm `timeout` cada. Uma conexão TCP por comando. Intervalo mínimo entre chamadas: o `discover_interval` (nunca em laço sem pausa: o servidor bloqueia o IP por 1 min acima de 50 req/min).
 
 ### 5.4 `MessageRouter` (C)
 
