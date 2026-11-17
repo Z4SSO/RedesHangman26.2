@@ -86,8 +86,15 @@ async def test_old_or_repeated_seq_is_discarded(player, caplog):
     await player.on_state(None, state(4, masked="b_____", lives=2))
     assert (player.seq, player.masked, player.lives) == (4, "_a_a_a", 5)
     assert "STATE seq=3 ignored (already at seq=4)" in caplog.text
-    assert "STATE seq=4 applied: _a_a_a lives=5 turn=bob@CIC" in caplog.text
-    assert "(você)" not in caplog.text.split("applied:")[1].splitlines()[0]  # texto da especificação
+    assert "STATE seq=4 applied: _a_a_a lives=5 turn=bob@CIC (você)" in caplog.text  # a vez é minha
+
+
+async def test_state_log_marks_you_only_on_your_own_turn(player, caplog):
+    caplog.set_level(logging.INFO)
+    await playing(player)
+    await player.on_state(None, state(2, turn="carol@CIC"))
+    line = next(r.getMessage() for r in caplog.records if "seq=2 applied" in r.getMessage())
+    assert line == "STATE seq=2 applied: ______ lives=6 turn=carol@CIC"  # turno alheio: sem sufixo
 
 
 async def test_hash_ok_and_cheat_detected(player, caplog):
