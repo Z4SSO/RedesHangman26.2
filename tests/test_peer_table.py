@@ -260,3 +260,180 @@ async def test_replacing_connection_of_connected_peer_emits_no_event():
     await table.attach(new)  # desempate de duplicada: troca silenciosa
     assert events == [(EVENT_CONNECTED, "bob@CIC")]  # um só, da primeira
     assert table.connected() == [new]
+
+
+# --- 01.6: reconexão com backoff --------------------------------------------
+
+from dataclasses import replace as _replace  # noqa: E402
+
+from forca.peer_table import backoff_delay  # noqa: E402
+
+FAST = _replace(CFG, base_backoff=0.02, max_backoff=0.08, max_reconnect_attempts=5)
+
+
+async def until(cond, timeout=3.0):
+    """Espera `cond()` ficar verdadeira (sem sleep fixo longo)."""
+    end = asyncio.get_running_loop().time() + timeout
+    while not cond():
+        if asyncio.get_running_loop().time() > end:
+            raise AssertionError("condição não ficou verdadeira a tempo")
+        await asyncio.sleep(0.005)
+
+
+def test_backoff_delay_follows_spec_with_default_values():
+    d = Config()  # base_backoff=2, max_backoff=60
+    assert [backoff_delay(n, d.base_backoff, d.max_backoff) for n in range(7)] == [
+        2, 4, 8, 16, 32, 60, 60
+    ]
+
+
+async def test_gives_up_after_max_attempts_and_becomes_gone():
+    conn = FakeConnector(fail={8082})
+    table = PeerTable(FAST, conn)
+    events = recorder(table)
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.state_of("bob@CIC") == PeerState.GONE)
+
+    assert len(conn.calls) == 1 + 5  # a conexão inicial + 5 reconexões, nem uma a mais
+    assert events == [(EVENT_GONE, "bob@CIC")]
+    entry = table.peers()[0]
+    assert entry.retry_task is None and entry.attempts == 5
+    await asyncio.sleep(0.2)
+    assert len(conn.calls) == 6  # GONE não tenta mais
+
+
+async def test_waits_double_until_the_cap():
+    conn = FakeConnector(fail={8082})
+    table = PeerTable(FAST, conn)
+    delays = []
+    original = table._schedule_retry
+
+    async def spy(entry):
+        before = entry.retry_task
+        await original(entry)
+        if entry.retry_task is not None and entry.retry_task is not before:
+            delays.append(entry.next_retry - asyncio.get_running_loop().time())
+
+    table._schedule_retry = spy
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.state_of("bob@CIC") == PeerState.GONE)
+    expected = [0.02, 0.04, 0.08, 0.08, 0.08]  # base × 2^n, limitado a max_backoff
+    assert len(delays) == 5
+    assert all(abs(d - e) < 0.015 for d, e in zip(delays, expected)), delays
+
+
+async def test_discover_brings_gone_peer_back_and_resets_attempts():
+    conn = FakeConnector(fail={8082})
+    conn.by_port = {8082: "bob@CIC"}
+    table = PeerTable(FAST, conn)
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.state_of("bob@CIC") == PeerState.GONE)
+
+    conn.fail.clear()  # o peer voltou a responder
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED)
+    assert table.peers()[0].attempts == 0
+
+
+async def test_successful_reconnect_resets_attempts():
+    conn = FakeConnector(fail={8082})
+    conn.by_port = {8082: "bob@CIC"}
+    table = PeerTable(FAST, conn)
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: len(conn.calls) >= 3)  # falhou 3 vezes
+    assert table.peers()[0].attempts >= 2
+    conn.fail.clear()
+    await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED)
+    entry = table.peers()[0]
+    assert entry.attempts == 0 and entry.retry_task is None and entry.next_retry is None
+
+
+async def test_lost_connection_is_retried_and_events_follow():
+    conn = FakeConnector()
+    conn.by_port = {8082: "bob@CIC"}
+    table = PeerTable(FAST, conn)
+    events = recorder(table)
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED)
+    first = table.connected()[0]
+
+    await table.detach(first)  # a conexão caiu
+    assert table.state_of("bob@CIC") == PeerState.STALE
+    await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED)
+    assert table.connected()[0] is not first
+    assert events == [(EVENT_CONNECTED, "bob@CIC"), (EVENT_STALE, "bob@CIC"),
+                      (EVENT_CONNECTED, "bob@CIC")]
+
+
+async def test_inbound_connection_cancels_pending_retry():
+    conn = FakeConnector(fail={8082})
+    table = PeerTable(CFG, conn)  # backoff padrão (2 s): a espera fica pendente
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.peers() and table.peers()[0].retry_task is not None)
+
+    await table.attach(FakeConn("bob@CIC", "inbound"))  # o bob conectou em nós
+    entry = table.peers()[0]
+    assert entry.state == PeerState.CONNECTED
+    assert entry.retry_task is None and entry.attempts == 0
+    await asyncio.sleep(0.05)
+    assert len(conn.calls) == 1  # nenhuma reconexão depois disso
+    await table.close_all()
+
+
+async def test_peer_absent_from_discover_cancels_retry():
+    conn = FakeConnector(fail={8082})
+    table = PeerTable(CFG, conn)
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.peers() and table.peers()[0].retry_task is not None)
+    await table.reconcile([])
+    entry = table.peers()[0]
+    assert entry.state == PeerState.GONE and entry.retry_task is None
+    await table.close_all()
+
+
+async def test_close_all_cancels_pending_retries():
+    conn = FakeConnector(fail={8082})
+    table = PeerTable(CFG, conn)
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.peers() and table.peers()[0].retry_task is not None)
+    await asyncio.wait_for(table.close_all(), 1)
+    assert not table._tasks
+
+
+async def test_retry_now_tries_immediately_and_restarts_count():
+    conn = FakeConnector(fail={8082})
+    conn.by_port = {8082: "bob@CIC"}
+    table = PeerTable(CFG, conn)  # backoff padrão: sem retry_now esperaria 2 s
+    await table.reconcile([item("bob", 8082)])
+    await until(lambda: table.peers() and table.peers()[0].retry_task is not None)
+    assert table.peers()[0].attempts == 1
+
+    conn.fail.clear()
+    table.retry_now()
+    await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED, timeout=1.0)
+    assert len(conn.calls) == 2 and table.peers()[0].attempts == 0
+    await table.close_all()
+
+
+async def test_peer_in_backoff_does_not_delay_the_others():
+    conn = FakeConnector(fail={8082})
+    conn.by_port = {8082: "bob@CIC", 8083: "carol@CIC"}
+    table = PeerTable(CFG, conn)  # bob espera 2 s; carol não pode esperar junto
+    started = asyncio.get_running_loop().time()
+    await table.reconcile([item("bob", 8082), item("carol", 8083)])
+    await until(lambda: table.state_of("carol@CIC") == PeerState.CONNECTED, timeout=1.0)
+    assert asyncio.get_running_loop().time() - started < 0.5
+    await table.close_all()
+
+
+async def test_stale_peer_without_address_is_tried_when_discover_brings_it():
+    conn = FakeConnector()
+    conn.by_port = {8082: "bob@CIC"}
+    table = PeerTable(FAST, conn)
+    bob_in = FakeConn("bob@CIC", "inbound")
+    await table.attach(bob_in)  # só conhecemos o bob por uma conexão de entrada
+    await table.detach(bob_in)  # caiu: sem ip/porta não há como reconectar
+    assert table.state_of("bob@CIC") == PeerState.STALE and conn.calls == []
+
+    await table.reconcile([item("bob", 8082)])  # o DISCOVER traz o endereço
+    await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED)

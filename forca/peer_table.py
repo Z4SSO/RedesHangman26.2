@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 from .config import Config
@@ -39,6 +39,13 @@ ConnectFn = Callable[[str, int], Awaitable["PeerConnection | None"]]
 Callback = Callable[[str], Awaitable[None]]
 
 
+def backoff_delay(n: int, base: float, max_: float) -> float:
+    """Espera antes da tentativa de reconexão número `n` (0, 1, 2, ...):
+    `base × 2^n`, limitada a `max_` (especificação, "Gerenciamento de
+    Conexões e Reconexões"). Com os padrões: 2, 4, 8, 16, 32, 60, 60..."""
+    return min(base * 2**n, max_)
+
+
 @dataclass
 class PeerEntry:
     """Uma linha da tabela. `ip`/`port` vêm do DISCOVER (None se o peer só
@@ -49,8 +56,9 @@ class PeerEntry:
     port: int | None = None
     state: PeerState = PeerState.DISCOVERED
     conn: "PeerConnection | None" = None
-    attempts: int = 0  # tentativas de reconexão seguidas (01.6)
-    next_retry: float | None = None  # instante (loop.time()) da próxima tentativa (01.6)
+    attempts: int = 0  # reconexões já agendadas desde que o peer ficou STALE
+    next_retry: float | None = None  # instante (loop.time()) da próxima tentativa
+    retry_task: asyncio.Task | None = field(default=None, repr=False)  # espera pendente
 
 
 class PeerTable:
@@ -156,6 +164,10 @@ class PeerTable:
                 entry.attempts, entry.next_retry = 0, None
                 log.info("%s DISCOVERED again at %s:%s", peer_id, ip, port)
                 self._spawn_connect(entry)
+            elif entry.state == PeerState.STALE and entry.retry_task is None:
+                # caiu quando ainda não sabíamos o endereço (só tinha conexão de
+                # entrada): agora o DISCOVER trouxe, então tenta
+                self._spawn_connect(entry)
 
         for peer_id, entry in list(self._entries.items()):
             if peer_id not in seen and entry.state != PeerState.GONE:
@@ -180,6 +192,7 @@ class PeerTable:
         if entry.conn is conn and entry.state == PeerState.CONNECTED:
             return
         was_connected = entry.state == PeerState.CONNECTED
+        self._cancel_retry(entry)  # reconectou (por nós ou pelo vizinho): sem espera pendente
         entry.conn = conn
         entry.state = PeerState.CONNECTED
         entry.attempts, entry.next_retry = 0, None
@@ -207,6 +220,7 @@ class PeerTable:
         entry.state = PeerState.STALE
         log.warning("%s STALE (connection lost)", conn.peer_id)
         await self._emit(EVENT_STALE, conn.peer_id)
+        await self._schedule_retry(entry)
 
     # --- encerramento -------------------------------------------------------
 
@@ -227,9 +241,7 @@ class PeerTable:
     def _spawn_connect(self, entry: PeerEntry) -> None:
         """Dispara a conexão em segundo plano e guarda a tarefa (cancelada no
         close_all). Uma conexão lenta não atrasa a reconciliação dos outros."""
-        task = asyncio.create_task(self._connect(entry), name=f"connect {entry.peer_id}")
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._track(asyncio.create_task(self._connect(entry), name=f"connect {entry.peer_id}"))
 
     async def _connect(self, entry: PeerEntry) -> None:
         if entry.state not in (PeerState.DISCOVERED, PeerState.STALE):
@@ -253,14 +265,72 @@ class PeerTable:
         elif conn is not None:
             await self.attach(conn)
         elif entry.state == PeerState.CONNECTING:
-            # falhou, e nenhuma conexão de entrada apareceu nesse meio tempo.
-            # STALE = "conexão perdida": é dele que o backoff (01.6) parte.
+            # falhou, e nenhuma conexão de entrada apareceu nesse meio tempo:
+            # STALE e nova tentativa com backoff
             entry.state = PeerState.STALE
             log.info("%s unreachable at %s:%s", entry.peer_id, entry.ip, entry.port)
+            await self._schedule_retry(entry)
         # se virou CONNECTED por uma conexão de entrada (desempate de
         # duplicada, 01.4) ou GONE durante a espera, não mexe.
 
+    # --- reconexão com backoff (01.6) ---------------------------------------
+
+    async def _schedule_retry(self, entry: PeerEntry) -> None:
+        """Agenda a próxima tentativa de reconexão de um peer STALE.
+
+        A espera é `backoff_delay(attempts)` e usa `asyncio.sleep` dentro de uma
+        tarefa própria: não bloqueia nada nem as outras conexões. Depois de
+        `max_reconnect_attempts` tentativas o peer vira GONE (até reaparecer
+        num DISCOVER).
+        """
+        if self._closing or entry.ip is None or entry.port is None:
+            return  # sem endereço não há o que tentar; o próximo DISCOVER traz
+        if entry.retry_task is not None:
+            return  # já há uma espera pendente
+        if entry.attempts >= self.cfg.max_reconnect_attempts:
+            await self._mark_gone(entry, f"gave up after {entry.attempts} reconnect attempts")
+            return
+        delay = backoff_delay(entry.attempts, self.cfg.base_backoff, self.cfg.max_backoff)
+        entry.attempts += 1
+        entry.next_retry = asyncio.get_running_loop().time() + delay
+        log.info("%s reconnect attempt %d/%d in %.1f s",
+                 entry.peer_id, entry.attempts, self.cfg.max_reconnect_attempts, delay)
+        entry.retry_task = self._track(
+            asyncio.create_task(self._retry(entry, delay), name=f"retry {entry.peer_id}")
+        )
+
+    async def _retry(self, entry: PeerEntry, delay: float) -> None:
+        await asyncio.sleep(delay)
+        entry.retry_task = None  # a espera acabou: daqui em diante não se cancela
+        entry.next_retry = None
+        await self._connect(entry)
+
+    def _cancel_retry(self, entry: PeerEntry) -> None:
+        """Cancela a espera pendente (se houver e se não for a tarefa atual)."""
+        task, entry.retry_task = entry.retry_task, None
+        entry.next_retry = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
+    def retry_now(self) -> None:
+        """Para o `/reconnect`: tenta já todos os peers STALE, sem esperar o
+        backoff, e recomeça a contagem de tentativas deles."""
+        if self._closing:
+            return
+        for entry in self._entries.values():
+            if entry.state == PeerState.STALE and entry.ip is not None:
+                self._cancel_retry(entry)
+                entry.attempts = 0
+                self._spawn_connect(entry)
+
+    def _track(self, task: asyncio.Task) -> asyncio.Task:
+        """Guarda a tarefa para o close_all() cancelar."""
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
     async def _mark_gone(self, entry: PeerEntry, why: str) -> None:
+        self._cancel_retry(entry)
         entry.state = PeerState.GONE
         conn, entry.conn = entry.conn, None
         log.info("%s GONE (%s)", entry.peer_id, why)

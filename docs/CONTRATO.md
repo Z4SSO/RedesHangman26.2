@@ -100,10 +100,12 @@ await table.broadcast(msg_factory)             # msg_factory(peer_id) -> dict
 await table.reconcile(discovered: list[dict])  # resultado do DISCOVER
 await table.attach(conn); await table.detach(conn)   # chamados pelo PeerServer (A)
 await table.close_all(reason="shutdown")       # BYE a todos + cancela conexões pendentes (/quit)
+table.retry_now()                             # /reconnect: tenta já os STALE (síncrono)
 ```
 
 Eventos: `peer_connected`, `peer_stale`, `peer_gone`. **`peer_stale` é o gatilho de falha**: o host remove o jogador; o jogador, se era o host, aborta a partida. `peer_gone` também deve ser tratado como queda.
 
+- **Reconexão com backoff (01.6):** peer `STALE` (caiu ou não respondeu à conexão) é tentado de novo após `base_backoff × 2^n` s, limitado a `max_backoff` (padrão: 2, 4, 8, 16, 32 s). Depois de `max_reconnect_attempts` reconexões sem sucesso vira `GONE` (evento `peer_gone`) até reaparecer num `DISCOVER`. Conectar de novo (por nós ou por conexão de entrada do vizinho) zera a contagem. A espera usa `asyncio.sleep` em tarefa própria: não atrasa os outros peers. `table.retry_now()` (para o `/reconnect`) tenta já todos os `STALE` e recomeça a contagem deles.
 - `peer_stale` só é emitido quando cai uma conexão que estava `CONNECTED`. Falha na primeira tentativa de conexão deixa o peer `STALE` (para o backoff da 01.6) **sem** evento.
 - Depois de `close_all()` nenhum evento é emitido (o `/quit` não dispara a lógica de queda do jogo).
 - Callback que levanta exceção é registrado no log e não impede os outros.
