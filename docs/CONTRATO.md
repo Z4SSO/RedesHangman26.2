@@ -123,7 +123,7 @@ Tabela de despacho (quem trata cada tipo):
 | `GAME_LIST` | jogador (via CLI) | `GameHost.on_game_list` (responde `GAME_LIST_OK`, mesmo vazio) |
 | `GAME_LIST_OK` | host | resposta de `request()` |
 | `JOIN` | jogador | `GameHost.on_join` |
-| `JOIN_OK`, `JOIN_ERR` | host | `GamePlayer.on_join_ok` / `on_join_err` (e/ou `request()`) |
+| `JOIN_OK`, `JOIN_ERR` | host | `GamePlayer.on_join_ok` / `on_join_err`. O `/join` chama só `player.join()`; **não usar `request()` para o JOIN**, senão o `JOIN_ERR` nunca chega ao `on_join_err` e o jogador fica preso em `JOINED` |
 | `LEAVE` | jogador | `GameHost.on_leave` |
 | `LEAVE_OK` | host | `GamePlayer.on_leave_ok` |
 | `GAME_START` | host | `GamePlayer.on_game_start` |
@@ -158,7 +158,7 @@ Hangman(word: str, lives: int = 6)
 ### 5.6 `GameHost` (B)
 
 ```python
-host = GameHost(cfg, send: Sender)
+host = GameHost(cfg, send: Sender, busy: Callable[[], bool] = lambda: False)   # C: busy=lambda: player.active
 host.status: GameStatus; host.active: bool; host.game_id: str | None
 await host.create(word, max_players=None) -> game_id   # ValueError se palavra inválida
 await host.start()          # exige >= 1 jogador (ValueError se não)
@@ -172,19 +172,26 @@ host.describe() -> dict | None        # item de games[] do GAME_LIST_OK
 ### 5.7 `GamePlayer` (B)
 
 ```python
-player = GamePlayer(cfg, send: Sender)
+player = GamePlayer(cfg, send: Sender, busy: Callable[[], bool] = lambda: False)   # C: busy=lambda: host.active
 player.state: PlayerState; player.active: bool
 await player.join(host_peer_id, game_id); await player.leave()
 await player.guess_letter(l); await player.guess_word(w)
 player.status_lines() -> list[str]          # texto do /status
 # handlers: on_join_ok, on_join_err, on_leave_ok, on_game_start, on_state,
 #           on_guess_result, on_game_over   (async, (conn, msg))
-# evento:   on_peer_stale(peer_id)
+# eventos:  on_peer_stale(peer_id), on_peer_connected(peer_id)
 ```
+
+- `join()` já deixa o jogador em `JOINED` (ocupa o peer para a exclusão mútua); `JOIN_ERR` ou host fora do ar voltam a `IDLE`.
+- `leave()` envia `LEAVE` e vai a `IDLE` na hora, sem esperar o `LEAVE_OK` (o `/quit` não trava se o host caiu).
+- `on_peer_connected(peer_id)`: se o host de uma partida que estava `RUNNING` caiu e voltou **em até 120 s** (`REJOIN_WINDOW`), reenvia `JOIN` (rejoin). Se o peer já virou host ou jogador de outra partida (`busy()`), descarta o rejoin sem enviar nada. **C:** assinar `peer_connected` além de `peer_stale` e `peer_gone`.
+- `status_lines()` já devolve as linhas com o prefixo `[Game]`, prontas para imprimir.
 
 ### 5.8 Exclusão mútua (um peer = uma partida)
 
 Quem cria uma partida ou entra em uma verifica `not (host.active or player.active)`. Essa checagem fica na **CLI (C)** antes de chamar B, e B repete a checagem (defesa em profundidade) e levanta `RuntimeError("already in a game")`.
+
+Para B conseguir olhar o outro objeto sem importá-lo, **quem liga os objetos (C) passa `busy`**: `host = GameHost(cfg, send, busy=lambda: player.active)` e `player = GamePlayer(cfg, send, busy=lambda: host.active)`. `GameHost.create` e `GamePlayer.join` levantam `RuntimeError` se `self.active or busy()`. Sem o `busy`, a defesa só olha o próprio objeto.
 
 ## 6. Decisões já tomadas (onde a especificação deixa margem)
 
@@ -207,6 +214,10 @@ Se o professor responder diferente, altere aqui e avise.
 15. **`GUESS` de quem não é jogador da partida** (e `GUESS` sem partida `RUNNING`): `GUESS_RESULT accepted:false reason:"game_not_running"` se há partida do host mas não está `RUNNING`; `ERROR invalid_state` se o host não tem partida alguma ou o `src` não está nela.
 16. **Palpite de letra com mais de um caractere ou fora de `a-z`**: `GUESS_RESULT reason:"invalid_letter"`. Letra maiúscula é normalizada para minúscula antes de checar.
 17. **Sem cliente de referência nem `forca-bot`:** a interoperabilidade (cenário 11 e issue 04.6) é testada entre **os próprios clientes do grupo**, em máquinas diferentes quando possível, e o que não puder ser verificado contra um cliente de terceiros é registrado como tal na entrega.
+
+18. **Sem `STATE` final** na vitória ou derrota: o `GAME_OVER` vem logo depois do `GUESS_RESULT` da última jogada, como no "Exemplo Completo de Sessão" da especificação.
+19. **Todo `GAME_OVER` do host passa por `FINISHED`** (60 s, depois `IDLE`): `WON`, `LOST` e `ABORTED` (`host_shutdown` e `no_players`), como no diagrama e na decisão 12. Só o `/quit` (`shutdown`) limpa tudo na hora.
+20. **`last_guess` repetido:** o jogador só anuncia o `last_guess` quando ele muda (o `STATE` de um `LEAVE`, queda ou rejoin repete o anterior).
 
 ## 7. Logging
 
