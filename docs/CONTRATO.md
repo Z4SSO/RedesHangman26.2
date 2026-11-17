@@ -76,7 +76,7 @@ class PeerConnection:
     async def close(self, reason: str = "shutdown")  # BYE, espera BYE_OK ≤ 2 s, fecha
 ```
 
-`PeerServer(cfg, on_message, on_closed)` com `start()`, `stop()` e `connect(ip, port) -> PeerConnection | None`.
+`PeerServer(cfg, on_message, on_closed, on_connected)` com `start()`, `stop()` e `connect(ip, port) -> PeerConnection | None`. `on_connected(conn)` é chamado quando uma conexão (de entrada ou de saída) conclui o HELLO e venceu o desempate; `on_closed(conn)` quando ela cai. Na montagem, `on_connected = table.attach` e `on_closed = table.detach`.
 
 - Até o `HELLO_OK` (ou, para quem aceita, até o `HELLO`), **nenhuma outra mensagem é aceita**: A descarta e não sobe nada ao roteador. `on_message` só é chamado com a conexão já identificada (`peer_id` e `features` preenchidos).
 - `connect()` devolve `None` se a conexão falhar **ou** se perder o desempate de duplicada (seção 6, item 1); nesse caso quem chamou não faz nada, porque já existe uma conexão válida para aquele vizinho.
@@ -84,15 +84,23 @@ class PeerConnection:
 ### 5.2 `PeerTable` (A)
 
 ```python
+table = PeerTable(cfg, connect_fn)     # connect_fn = PeerServer.connect (async (ip, port) -> conn | None)
 table.subscribe(event, callback)       # callback: async def cb(peer_id: str)
 table.state_of(peer_id) -> PeerState | None
+table.peers() -> list[PeerEntry]       # todas as entradas (/peers): peer_id, ip, port, state, conn, attempts, next_retry
 table.connected() -> list[PeerConnection]
 await table.send_to(peer_id, msg) -> bool      # implementa Sender
 await table.broadcast(msg_factory)             # msg_factory(peer_id) -> dict
 await table.reconcile(discovered: list[dict])  # resultado do DISCOVER
+await table.attach(conn); await table.detach(conn)   # chamados pelo PeerServer (A)
+await table.close_all(reason="shutdown")       # BYE a todos + cancela conexões pendentes (/quit)
 ```
 
 Eventos: `peer_connected`, `peer_stale`, `peer_gone`. **`peer_stale` é o gatilho de falha**: o host remove o jogador; o jogador, se era o host, aborta a partida. `peer_gone` também deve ser tratado como queda.
+
+- `peer_stale` só é emitido quando cai uma conexão que estava `CONNECTED`. Falha na primeira tentativa de conexão deixa o peer `STALE` (para o backoff da 01.6) **sem** evento.
+- Depois de `close_all()` nenhum evento é emitido (o `/quit` não dispara a lógica de queda do jogo).
+- Callback que levanta exceção é registrado no log e não impede os outros.
 
 ### 5.3 `RendezvousConnection` (A)
 
