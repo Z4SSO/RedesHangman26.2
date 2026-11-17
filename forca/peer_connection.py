@@ -227,15 +227,19 @@ class PeerConnection:
 
     # --- fechamento ---------------------------------------------------------
 
-    async def close(self, reason: str = "shutdown") -> None:
-        """BYE, espera BYE_OK por até 2 s, fecha o socket com ou sem resposta."""
+    async def close(self, reason: str = "shutdown", wait_ack: bool = True) -> None:
+        """BYE, espera BYE_OK por até 2 s, fecha o socket com ou sem resposta.
+
+        `wait_ack=False` envia o BYE e fecha na hora: usado pelo KeepAlive com
+        um peer que já não responde (esperar 2 s só atrasaria o `peer_stale`).
+        """
         if self.closed:
             return
         if self.peer_id is not None:
             bye = protocol.new_message(
                 "BYE", src=self._server.cfg.peer_id, dst=self.peer_id, reason=reason
             )
-            if await self.send(bye):
+            if await self.send(bye) and wait_ack:
                 try:
                     await asyncio.wait_for(self._bye_ack.wait(), BYE_TIMEOUT)
                 except asyncio.TimeoutError:

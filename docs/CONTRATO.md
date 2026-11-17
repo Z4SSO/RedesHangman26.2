@@ -118,6 +118,21 @@ await rdv.unregister() -> None
 
 `RendezvousConnection(cfg, timeout=5.0)`. Lança `RendezvousError` com `.message` igual ao `message` do servidor quando `status == "ERROR"` (ex.: `peer_not_registered`, texto do bloqueio). Falhas de rede também viram `RendezvousError`, com `.message` `"timeout"`, `"connection_failed"` ou `"bad_response"`, para quem chama tratar um tipo só. Conectar e ler a resposta têm `timeout` cada. Uma conexão TCP por comando. Intervalo mínimo entre chamadas: o `discover_interval` (nunca em laço sem pausa: o servidor bloqueia o IP por 1 min acima de 50 req/min).
 
+### 5.3.1 `KeepAlive` (A)
+
+```python
+ka = KeepAlive(cfg)
+ka.watch(conn)                  # começa a enviar PING a cada cfg.ping_interval (o 1º sai na hora)
+ka.on_pong(conn, msg)           # síncrono; ligado em PeerServer.on_pong
+ka.unwatch(conn)
+await ka.stop()                 # cancela todas as tarefas de PING
+```
+
+- RTT = recepção do `PONG` − envio do `PING` casado por `msg_id` (relógio monotônico); `conn.rtt_ms` é a média dos últimos 10. Log do RTT em **DEBUG** (`[KeepAlive] bob@CIC RTT=41.7 ms (avg 43.2 ms)`): com um PING por vizinho a cada 30 s, em INFO ele poluiria a tela durante a partida; aparece no `--log-file`.
+- Após `ping_miss_limit` (3) PINGs seguidos sem `PONG`: `WARNING [KeepAlive] X missed 3 PINGs — marking STALE`, `conn.state = STALE` e `conn.close("idle", wait_ack=False)`. O fechamento chega ao `on_closed` e daí à `PeerTable.detach`, que emite `peer_stale` uma única vez. Não espera o `BYE_OK` (o peer já não responde).
+- **Ligação (C/01.7):** `server.on_pong = ka.on_pong`; o `on_connected` do servidor chama `ka.watch(conn)` e depois `table.attach(conn)`. Não é preciso `unwatch` no `on_closed`: a tarefa termina sozinha quando a conexão fecha. `ka.stop()` entra no `P2PClient.stop()`.
+- `PeerConnection.close(reason, wait_ack=True)`: com `wait_ack=False` envia o `BYE` e fecha na hora.
+
 ### 5.4 `MessageRouter` (C)
 
 ```python
