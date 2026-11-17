@@ -22,7 +22,7 @@ Implementar o timeout de turno, a remoção de jogador caído e o retorno de jog
 
 - [ ] Timer de turno de `turn_timeout` s, reiniciado a cada `STATE`; ao estourar, passa o turno e difunde `STATE` com `last_guess: {"player": ..., "timeout": true}`, **sem custar vida**; log `[Host] Turn timeout for carol@CIC — skipping`
 - [ ] `on_peer_stale(peer_id)`: se era jogador, remove, difunde `STATE`; se era a vez dele, passa o turno; log `[Host] Player carol@CIC STALE — removed from game`
-- [ ] Se não restar nenhum jogador: `GAME_OVER ABORTED reason:"no_players"` (só registrado) e volta a `IDLE`
+- [ ] Se não restar nenhum jogador: `GAME_OVER ABORTED reason:"no_players"` (só registrado) e volta a `IDLE`. **Nota:** as decisões 12 e 19 do `CONTRATO.md` valem sobre este texto: a partida passa por `FINISHED` (60 s no `GAME_LIST_OK`) e só depois volta a `IDLE`
 - [ ] `LEAVE` durante `RUNNING` também difunde novo `STATE`
 - [ ] `JOIN` de quem já era jogador numa partida `RUNNING`: `JOIN_OK rejoin:true` + `STATE` corrente; ele volta ao **fim** do rodízio
 - [ ] Cancelar o timer em todo fim de partida (sem tarefa vazando)

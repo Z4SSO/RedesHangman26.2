@@ -51,4 +51,10 @@ def load_config(path: str | Path | None, overrides: dict[str, Any] | None = None
     if overrides:
         cfg = replace(cfg, **{k: v for k, v in overrides.items() if v is not None and k in known})
 
+    # O host manda turn_timeout no GAME_START, onde o protocolo exige inteiro; e 0 faria o
+    # timer de turno estourar sem parar.
+    t = cfg.turn_timeout
+    if not isinstance(t, int) or isinstance(t, bool) or t < 1:
+        raise ValueError(f"turn_timeout must be an integer >= 1, got {t!r}")
+
     return cfg
