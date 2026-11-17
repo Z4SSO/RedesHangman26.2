@@ -31,6 +31,7 @@ Legenda: **A** = rede, **B** = jogo, **C** = CLI/roteador/logs.
 | `game_host.py` | B | 02.2 a 02.5 |
 | `game_player.py` | B | 02.6 |
 | `message_router.py` | C | 03.2 |
+| `game_wiring.py` | C | 01.7 (ligação do jogo à rede) |
 | `cli.py` | C | 03.3, 03.4 |
 | `main.py`, logging | C | 03.1, 03.5 |
 
@@ -107,10 +108,18 @@ Lança `RendezvousError(message)` quando `status == "ERROR"`. Uma conexão TCP p
 ### 5.4 `MessageRouter` (C)
 
 ```python
+router = MessageRouter(local_peer_id, send: Sender)   # send = PeerTable.send_to (o request() envia por ele)
 router.register(msg_type: str, handler)        # handler: async def h(conn, msg)
 await router.on_message(conn, msg)             # ponto de entrada vindo do PeerServer
+await router.on_bad_line(conn, exc)            # linha que não é JSON: responde ERROR bad_json
 await router.request(peer_id, msg, timeout=5.0) -> dict | None
 ```
+
+- **A, ao ler o socket:** linha que não decodifica, **depois do HELLO** → `await router.on_bad_line(conn, exc)` e **depois** fecha a conexão (especificação, seção Transporte). **Antes do HELLO** só fecha a conexão, sem chamar `on_bad_line` (o `conn.peer_id` ainda é `None`; se for chamado mesmo assim, o roteador não envia nada). Linha válida → `await router.on_message(conn, msg)` só depois do HELLO (5.1).
+- **`conn` precisa ter** `peer_id`, `features` (lista) e `async send(msg)`. O roteador não importa `peer_connection`.
+- **`request()` devolve a resposta de mesmo `msg_id` ou um `ERROR`** cujo `ref_msg_id` aponta para ele (o `ERROR` tem `msg_id` novo): quem chama confere `reply["type"]`. O `/games` trata `ERROR` como "sem resposta".
+- **Limite do Rendezvous na CLI:** `/peers` e `/reconnect` dividem um intervalo mínimo de 5 s entre consultas (o limite é de 50 req/min **por IP**, e os peers do `run_local` saem pelo mesmo IP).
+- **Anti-spoof (decisão 21):** mensagem com `src` diferente do `conn.peer_id` é descartada com WARNING, sem resposta. Sem isso qualquer vizinho conectado jogaria no lugar de outro. Uma resposta de `request()` também só vale se vier do peer para quem foi enviada.
 
 `request()` envia e espera a resposta de **mesmo `msg_id`**; usado por `/games` (GAME_LIST → GAME_LIST_OK) e `/join` (JOIN → JOIN_OK/JOIN_ERR). Uma resposta casada com um `request` pendente **não** vai para os handlers.
 
@@ -170,7 +179,7 @@ host.status_lines() -> list[str]      # texto do /status do host; [] se não há
 # evento:   on_peer_stale(peer_id)
 ```
 
-- **`/status` (C):** mostrar `host.status_lines()` se não for vazio; senão, `player.status_lines()`. As linhas já vêm com o prefixo `[Game]`. O host também mostra a palavra secreta (só ele a conhece).
+- **`/status` (C), nesta ordem:** se `player.active`, `player.status_lines()` (o host pode ainda estar em `FINISHED` por 60 s de uma partida anterior); senão, `host.status_lines()` se não for vazio; senão, `player.status_lines()` (o texto "não está em uma partida"). As linhas já vêm com o prefixo `[Game]`. O host também mostra a palavra secreta (só ele a conhece).
 - **Timeout de turno:** o host mantém um timer de `turn_timeout` s, reiniciado a cada `STATE`. Ao estourar, passa o turno sem custar vida e difunde `STATE` com `last_guess {"player", "timeout": true}`. O timer é cancelado em todo fim de partida e no `shutdown()`; não há nada para a C ligar.
 - `turn_timeout` é **inteiro >= 1**, validado em `config.load_config` (o `GAME_START` exige inteiro no `protocol`, e 0 faria o timer estourar sem parar).
 
@@ -198,6 +207,41 @@ Quem cria uma partida ou entra em uma verifica `not (host.active or player.activ
 
 Para B conseguir olhar o outro objeto sem importá-lo, **quem liga os objetos (C) passa `busy`**: `host = GameHost(cfg, send, busy=lambda: player.active)` e `player = GamePlayer(cfg, send, busy=lambda: host.active)`. `GameHost.create` e `GamePlayer.join` levantam `RuntimeError` se `self.active or busy()`. Sem o `busy`, a defesa só olha o próprio objeto.
 
+### 5.9 `P2PClient` (A) e a ligação (C)
+
+A **ligação** do jogo é da C e está em `forca/game_wiring.py`; o ciclo de vida do `P2PClient` é da A. O que cada um faz:
+
+```python
+# C: forca/game_wiring.py
+host, player = wire_game(cfg, table, router)   # cria GameHost/GamePlayer, registra no router (tabela 5.4),
+                                               # assina peer_stale/peer_gone/peer_connected e passa busy= (5.8)
+```
+
+**A, no `P2PClient`** (a CLI e o `main` usam estes nomes):
+
+```python
+client.cfg: Config
+client.rdv: RendezvousConnection        # /peers usa client.rdv.discover(namespace | None)
+client.table: PeerTable                 # /conn e /rtt usam table.connected()
+client.router: MessageRouter            # /games usa router.request(...)
+client.host: GameHost; client.player: GamePlayer
+await client.start(); await client.stop()
+await client.reconcile_now()            # /reconnect: DISCOVER + reconcile imediatos
+```
+
+Em `__init__`/`start()`, nesta ordem: `table = PeerTable()` → `router = MessageRouter(cfg.peer_id, table.send_to)` → `host, player = wire_game(cfg, table, router)` → `PeerServer(cfg, on_message=router.on_message, ...)`. Os callbacks de `table.subscribe` são uma **lista** por evento (o `wire_game` assina `peer_stale` duas vezes: host e jogador).
+
+`stop()` segue a seção 8: `await host.shutdown()` e `await player.leave()` **antes** do `BYE`. O `main` chama `client.stop()` no `finally`, inclusive depois de `Ctrl+C` e de `/quit`.
+
+**Regras que a A precisa seguir** (a C e o `wire_game` dependem delas):
+
+- **`peer_stale` e `peer_gone` só disparam quando o peer fica SEM NENHUMA conexão.** Fechar a conexão duplicada (`BYE reason:"duplicate"`, decisão 1) **não** dispara evento. O `wire_game` trata todo `peer_stale` como queda: o host remove o jogador e o jogador aborta a partida; um disparo falso derrubaria uma partida que está funcionando.
+- **`client.stop()` é seguro mesmo se o `start()` falhou no meio ou foi cancelado** (por exemplo, `Ctrl+C` com o Rendezvous fora do ar): o `main` sempre o chama no `finally`. Em particular, não pode levantar por atributo que o `start()` ainda não criou.
+- **Linha que não é JSON antes do HELLO:** só fecha a conexão, sem `router.on_bad_line` (ver 5.4).
+- O `main` cancela o `client.start()` no primeiro `Ctrl+C`/SIGTERM; o `start()` deve deixar o `CancelledError` propagar (sem engoli-lo em um `except Exception`/`BaseException`).
+
+`PeerConnection` (5.1) precisa expor `peer_id`, `features`, `direction`, `state`, `rtt_ms` e `send`: a CLI e o roteador leem esses atributos.
+
 ## 6. Decisões já tomadas (onde a especificação deixa margem)
 
 Se o professor responder diferente, altere aqui e avise.
@@ -223,6 +267,7 @@ Se o professor responder diferente, altere aqui e avise.
 18. **Sem `STATE` final** na vitória ou derrota: o `GAME_OVER` vem logo depois do `GUESS_RESULT` da última jogada, como no "Exemplo Completo de Sessão" da especificação.
 19. **Todo `GAME_OVER` do host passa por `FINISHED`** (60 s, depois `IDLE`): `WON`, `LOST` e `ABORTED` (`host_shutdown` e `no_players`), como no diagrama e na decisão 12. Só o `/quit` (`shutdown`) limpa tudo na hora.
 20. **`last_guess` repetido:** o jogador só anuncia o `last_guess` quando ele muda (o `STATE` de um `LEAVE`, queda ou rejoin repete o anterior).
+21. **Anti-spoof:** o roteador descarta (WARNING, sem resposta) toda mensagem cujo `src` não é o `peer_id` da conexão por onde chegou, e só aceita a resposta de um `request()` vinda do peer para quem ele foi enviado. A especificação não cobre; sem isso um vizinho conectado jogaria no lugar de outro.
 
 ## 7. Logging
 

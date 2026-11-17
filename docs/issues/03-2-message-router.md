@@ -22,7 +22,7 @@ Implementar `MessageRouter` conforme o contrato (seção 5.4), testado com conex
 
 - [ ] `register(type, handler)` e `on_message(conn, msg)`
 - [ ] `validate_envelope` antes de despachar: `unknown_type`, `bad_request`, `not_for_me` viram `ERROR` ao remetente; `ttl != 1` é descartada em silêncio; a conexão **permanece aberta**
-- [ ] Mensagem de contexto inválido (`GUESS` fora de partida) responde `ERROR invalid_state` (o handler levanta e o roteador traduz)
+- [ ] Mensagem de contexto inválido (`GUESS` fora de partida) responde `ERROR invalid_state` (o handler levanta e o roteador traduz). **Nota:** o contrato 5.4 e as decisões 14 e 15 prevalecem sobre este texto: quem envia o `ERROR invalid_state` é o **handler de B** (`protocol.make_error`), e o roteador só registra a exceção de um handler que quebrar
 - [ ] `ERROR` recebido só é registrado no log e **nunca** gera resposta
 - [ ] Peer sem a feature `hangman` nunca recebe nem entrega mensagens de lobby/partida
 - [ ] `request(peer_id, msg, timeout)`: envia e espera a resposta de mesmo `msg_id`; `None` no timeout; resposta casada não vai aos handlers
