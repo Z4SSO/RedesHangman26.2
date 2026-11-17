@@ -20,11 +20,11 @@ Percorrer todos os módulos e garantir que cada evento da lista de exemplos da e
 
 ## Dentro do escopo
 
-- [ ] Montar uma tabela `evento da especificação → logger → arquivo:linha` (em `docs/` ou no PR)
-- [ ] Corrigir textos divergentes por PR pequeno ao dono do módulo (ou pedir a ele)
-- [ ] Conferir que `DEBUG` mostra o JSON bruto de **toda** mensagem enviada/recebida
-- [ ] Conferir que a tela mostra `[CLI]`, `[Game]` e `INFO`, e o arquivo mostra tudo
-- [ ] Rodar o `spec-reviewer` na seção "Observabilidade e Logs"
+- [x] Montar uma tabela `evento da especificação → logger → arquivo:linha` ([`docs/LOGS.md`](../LOGS.md))
+- [x] Corrigir textos divergentes por PR pequeno ao dono do módulo (ou pedir a ele)
+- [x] Conferir que `DEBUG` mostra o JSON bruto de **toda** mensagem enviada/recebida
+- [x] Conferir que a tela mostra `[CLI]`, `[Game]` e `INFO`, e o arquivo mostra tudo
+- [x] Rodar o `spec-reviewer` na seção "Observabilidade e Logs"
 
 ## Fora do escopo
 
@@ -32,8 +32,8 @@ Percorrer todos os módulos e garantir que cada evento da lista de exemplos da e
 
 ## Critérios de aceite
 
-- [ ] Cada linha de exemplo da especificação tem o evento correspondente no código
-- [ ] Uma partida completa gera log legível de ponta a ponta no arquivo
+- [x] Cada linha de exemplo da especificação tem o evento correspondente no código
+- [x] Uma partida completa gera log legível de ponta a ponta no arquivo
 
 ## Itens a estudar
 

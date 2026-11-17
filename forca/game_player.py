@@ -181,7 +181,8 @@ class GamePlayer:
         self.state = PlayerState.PLAYING  # cobre o rejoin, que chega sem GAME_START
         self._turn_started = time.monotonic()
         mine = self.turn == self.cfg.peer_id
-        log.info("STATE seq=%d applied: %s lives=%d turn=%s", seq, self.masked, self.lives, self.turn)
+        log.info("STATE seq=%d applied: %s lives=%d turn=%s%s", seq, self.masked, self.lives,
+                 self.turn, " (você)" if mine else "")  # Exemplo de Sessão da especificação
         last = msg.get("last_guess")
         if isinstance(last, dict) and last != self._shown_last:  # LEAVE/queda repetem o último
             self._shown_last = last
