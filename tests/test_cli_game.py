@@ -280,3 +280,31 @@ async def test_create_with_a_unicode_digit_is_a_usage_error_not_a_traceback(w, c
     await run(w.alice, "/create casa ²")
     assert w.alice.host.status == GameStatus.IDLE and "Traceback" not in caplog.text
     assert any("uso: /create" in m for m in out(caplog))
+
+
+# --- revisão 2: /status mostra a partida em que o peer está jogando ---
+
+
+async def test_status_shows_the_game_being_played_not_a_finished_hosted_one(w, caplog):
+    await run(w.alice, "/create casa")
+    await run(w.bob, "/join alice")
+    await run(w.alice, "/start")
+    await run(w.bob, "/word casa")  # a partida da alice termina: o host fica em FINISHED por 60 s
+    assert w.alice.host.status == GameStatus.FINISHED
+    await run(w.carol, "/create gato")
+    await run(w.alice, "/join carol@CIC")  # e ela entra, como jogadora, na partida da carol
+    caplog.clear()
+    await run(w.alice, "/status")
+    shown = "\n".join(out(caplog, "Game"))
+    assert w.carol.host.game_id in shown and "host: carol@CIC" in shown
+    assert "FINISHED" not in shown and "casa" not in shown and "bob@CIC" not in shown
+
+
+async def test_status_of_a_finished_hosted_game_is_still_shown_when_not_playing(w, caplog):
+    await run(w.alice, "/create casa")
+    await run(w.bob, "/join alice")
+    await run(w.alice, "/start")
+    await run(w.bob, "/word casa")
+    caplog.clear()
+    await run(w.alice, "/status")
+    assert "status: FINISHED" in "\n".join(out(caplog, "Game"))

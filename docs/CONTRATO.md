@@ -179,7 +179,7 @@ host.status_lines() -> list[str]      # texto do /status do host; [] se não há
 # evento:   on_peer_stale(peer_id)
 ```
 
-- **`/status` (C):** mostrar `host.status_lines()` se não for vazio; senão, `player.status_lines()`. As linhas já vêm com o prefixo `[Game]`. O host também mostra a palavra secreta (só ele a conhece).
+- **`/status` (C), nesta ordem:** se `player.active`, `player.status_lines()` (o host pode ainda estar em `FINISHED` por 60 s de uma partida anterior); senão, `host.status_lines()` se não for vazio; senão, `player.status_lines()` (o texto "não está em uma partida"). As linhas já vêm com o prefixo `[Game]`. O host também mostra a palavra secreta (só ele a conhece).
 - **Timeout de turno:** o host mantém um timer de `turn_timeout` s, reiniciado a cada `STATE`. Ao estourar, passa o turno sem custar vida e difunde `STATE` com `last_guess {"player", "timeout": true}`. O timer é cancelado em todo fim de partida e no `shutdown()`; não há nada para a C ligar.
 - `turn_timeout` é **inteiro >= 1**, validado em `config.load_config` (o `GAME_START` exige inteiro no `protocol`, e 0 faria o timer estourar sem parar).
 

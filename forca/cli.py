@@ -375,8 +375,10 @@ class CLI:
             raise UsageError("Você não está em uma partida em andamento.")
 
     async def cmd_status(self, args: list[str]) -> None:
-        """/status: o host mostra a sua partida; senão o jogador mostra a dele."""
-        for line in self.client.host.status_lines() or self.client.player.status_lines():
+        """/status: quem está jogando vê a partida em que joga (o host pode ainda estar em FINISHED
+        por 60 s); senão, a hospedada; senão, o texto "não está em uma partida"."""
+        host, player = self.client.host, self.client.player
+        for line in player.status_lines() if player.active else (host.status_lines() or player.status_lines()):
             game_log.info("%s", line.removeprefix("[Game] "))  # o logger já escreve [Game]
 
 
