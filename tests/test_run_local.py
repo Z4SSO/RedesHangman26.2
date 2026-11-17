@@ -119,3 +119,10 @@ async def test_kill_needs_the_exact_command(fake_peer, tmp_path):
         assert launcher.alive() == ["alice", "bob", "carol"] and any("uso:" in l for l in out)
     finally:
         await launcher.quit_all(1)
+
+
+def test_default_screen_level_is_info_and_the_log_file_keeps_everything():
+    assert run_local.Launcher(["a"]).log_level == "INFO"  # o arquivo já recebe DEBUG e o JSON bruto
+    assert run_local.build_parser().parse_args([]).log_level == "INFO"
+    cmd = run_local.peer_command("bob", 8082, "CIC", "INFO", Path("/x"))
+    assert cmd[cmd.index("--log-file") + 1] == "/x/bob.log" and cmd[cmd.index("--log-level") + 1] == "INFO"

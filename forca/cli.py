@@ -25,12 +25,6 @@ from .rendezvous_connection import RendezvousError
 log = logging.getLogger("CLI")
 game_log = logging.getLogger("Game")
 
-COMMANDS = (
-    "/peers", "/conn", "/rtt", "/reconnect", "/games", "/create", "/start",
-    "/cancel", "/join", "/leave", "/guess", "/word", "/status", "/log",
-    "/help", "/quit",
-)
-
 # Os 17 comandos da especificação (seção "Interface de Usuário"): /create tem duas formas.
 HELP = (
     ("/peers [* | #namespace]", "descobre e lista peers (padrão: namespace local)"),

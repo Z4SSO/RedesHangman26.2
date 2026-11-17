@@ -273,3 +273,9 @@ async def test_leave_tells_the_host_to_use_cancel(caplog):
     client.player = SimpleNamespace(active=False)
     await make_cli(client).execute("/leave")
     assert any("/cancel" in m for m in lines(caplog))
+
+
+def test_help_is_the_only_command_list():
+    from forca import cli
+
+    assert not hasattr(cli, "COMMANDS") and len(cli.HELP) == 17

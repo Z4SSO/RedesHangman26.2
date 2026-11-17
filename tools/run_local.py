@@ -12,7 +12,8 @@ Entrada (uma linha por comando):
 
 Todos os peers saem pelo MESMO IP (o limite do Rendezvous é por IP) e se registram com o IP
 público: no servidor compartilhado use um --namespace só seu (ex.: --namespace CIC-caio) para não
-colidir com peers de outros grupos. Cada peer escreve o log completo em logs/<nome>.log. Fechar a entrada (Ctrl+D) ou Ctrl+C
+colidir com peers de outros grupos. A tela de cada peer mostra INFO (--log-level muda); o arquivo
+logs/<nome>.log já recebe tudo, inclusive DEBUG e o JSON bruto de cada mensagem. Fechar a entrada (Ctrl+D) ou Ctrl+C
 também encerra tudo; nenhum processo fica órfão.
 """
 
@@ -38,7 +39,7 @@ def peer_command(name: str, port: int, namespace: str, log_level: str, log_dir: 
 
 class Launcher:
     def __init__(self, names: list[str], base_port: int = 8081, namespace: str = "CIC",
-                 log_level: str = "DEBUG", log_dir: Path = ROOT / "logs",
+                 log_level: str = "INFO", log_dir: Path = ROOT / "logs",
                  out: Callable[[str], None] = print, command=peer_command) -> None:
         self.names, self.base_port, self.namespace = names, base_port, namespace
         self.log_level, self.log_dir, self.out, self.command = log_level, log_dir, out, command
@@ -153,14 +154,18 @@ async def run(args: argparse.Namespace) -> None:
         await launcher.quit_all(args.grace)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Sobe N peers locais do PyP2P-Forca")
     ap.add_argument("--names", default="alice,bob,carol")
     ap.add_argument("--base-port", type=int, default=8081)
     ap.add_argument("--namespace", default="CIC")
-    ap.add_argument("--log-level", default="DEBUG", help="nível mostrado na tela de cada peer")
+    ap.add_argument("--log-level", default="INFO", help="nível mostrado na tela de cada peer")
     ap.add_argument("--grace", type=float, default=GRACE, help="s para os peers saírem no /quit antes do SIGKILL")
-    asyncio.run(run(ap.parse_args()))
+    return ap
+
+
+def main() -> None:
+    asyncio.run(run(build_parser().parse_args()))
 
 
 if __name__ == "__main__":
