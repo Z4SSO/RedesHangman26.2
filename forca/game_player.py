@@ -22,8 +22,9 @@ game_log = logging.getLogger("Game")
 # shortcut: valor escolhido no olho (4 ciclos de PING de 30 s), não vem da especificação;
 # ajustar se o cliente de referência demorar mais que isso para voltar.
 REJOIN_WINDOW = 120.0
-# shortcut: idem; quanto o jogador espera o GAME_START do novo host antes de abortar (bônus 05.1).
-MIGRATION_TIMEOUT = 30.0
+# shortcut: folga (s) somada à detecção por PING (ping_interval x ping_miss_limit) na espera do
+# GAME_START do novo host (bônus 05.1); escolhida no olho, subir se o sucessor demorar mais.
+MIGRATION_MARGIN = 10.0
 
 
 class GamePlayer:
@@ -313,8 +314,13 @@ class GamePlayer:
             game_log.warning("Could not take over the game — game aborted")
         return True
 
+    def _migration_wait(self) -> float:
+        """Quanto esperar o GAME_START do sucessor: numa queda de rede cada peer só detecta
+        depois de `ping_miss_limit` PINGs perdidos, cada um no seu ritmo."""
+        return self.cfg.ping_interval * self.cfg.ping_miss_limit + MIGRATION_MARGIN
+
     async def _migration_timeout(self, game_id: str | None) -> None:
-        await asyncio.sleep(MIGRATION_TIMEOUT)
+        await asyncio.sleep(self._migration_wait())
         if self.game_id == game_id and self.active:
             game_log.warning("New host %s did not start the game — game aborted", self.host_id)
             self._clear()

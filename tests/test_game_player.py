@@ -409,8 +409,8 @@ async def test_other_players_wait_for_the_successor(caplog):
 
 
 async def test_successor_game_start_resumes_and_cancels_the_timeout(monkeypatch):
-    monkeypatch.setattr(game_player, "MIGRATION_TIMEOUT", 0.05)
-    pl, _ = migrating("dave", PLAYERS)
+    monkeypatch.setattr(game_player, "MIGRATION_MARGIN", 0.05)
+    pl, _ = migrating("dave", PLAYERS, ping_interval=0, ping_miss_limit=1)
     await playing_as(pl, "dave@CIC", PLAYERS)
     await pl.on_peer_stale(HOST)
     await pl.on_game_start(None, incoming(
@@ -424,8 +424,8 @@ async def test_successor_game_start_resumes_and_cancels_the_timeout(monkeypatch)
 
 
 async def test_no_game_start_from_the_successor_aborts_after_the_timeout(monkeypatch, caplog):
-    monkeypatch.setattr(game_player, "MIGRATION_TIMEOUT", 0.05)
-    pl, _ = migrating("dave", PLAYERS)
+    monkeypatch.setattr(game_player, "MIGRATION_MARGIN", 0.05)
+    pl, _ = migrating("dave", PLAYERS, ping_interval=0, ping_miss_limit=1)
     await playing_as(pl, "dave@CIC", PLAYERS)
     await pl.on_peer_stale(HOST)
     await asyncio.sleep(0.15)
@@ -502,3 +502,12 @@ async def test_successor_game_start_is_accepted_when_the_old_host_is_not_connect
         "GAME_START", "bob@CIC", "dave@CIC", game_id=GID, players=["carol@CIC", "dave@CIC"], lives=5,
         word_length=4, word_hash=word_hash("casa"), turn_timeout=30))
     assert pl.host_id == "bob@CIC" and pl.lives == 5
+
+
+# --- revisão do PR 12, item 2: a espera acompanha a detecção por PING ---
+
+
+def test_migration_wait_covers_ping_detection_with_the_default_config():
+    pl, _ = migrating("dave", PLAYERS, ping_interval=30, ping_miss_limit=3)
+    assert pl._migration_wait() >= 90
+    assert pl._migration_wait() == 30 * 3 + game_player.MIGRATION_MARGIN
