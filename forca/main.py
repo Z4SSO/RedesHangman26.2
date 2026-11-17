@@ -8,9 +8,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
+from typing import Callable
 
 from .cli import CLI
 from .config import Config, load_config
@@ -114,24 +116,55 @@ def add_log_file(path: str) -> logging.Handler:
 # --- execução ---
 
 
-async def run(cfg: Config, screen: ScreenFilter) -> None:
-    """Sobe o cliente e a CLI; Ctrl+C e SIGTERM seguem o mesmo caminho do /quit."""
+def _force_exit() -> None:
+    """Segundo Ctrl+C durante o encerramento: sai agora, sem esperar o BYE de cada vizinho."""
+    logging.shutdown()  # descarrega os handlers antes de matar o processo
+    os._exit(130)
+
+
+async def run(cfg: Config, screen: ScreenFilter, force_exit: Callable[[], None] = _force_exit) -> None:
+    """Sobe o cliente e a CLI. Ctrl+C e SIGTERM seguem o mesmo caminho do /quit, inclusive
+    durante o `client.start()` (Rendezvous fora do ar); o segundo sinal força a saída."""
     client = P2PClient(cfg)
     cli = CLI(client, screen.set_level)
     loop = asyncio.get_running_loop()
+    starting = asyncio.ensure_future(client.start())
+    signals = 0
+
+    def on_signal() -> None:
+        nonlocal signals
+        signals += 1
+        if signals >= 2:  # o usuário já pediu para sair e continua esperando
+            log.warning("saída forçada")
+            force_exit()
+            return
+        cli.request_quit()
+        if not starting.done():
+            starting.cancel()  # o start() pendurado não deixa a CLI nem começar
+
+    registered = []
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, cli.request_quit)
+            loop.add_signal_handler(sig, on_signal)
+            registered.append(sig)
         except NotImplementedError:  # Windows
             pass
     try:
-        await client.start()
-        await cli.run()
+        try:
+            await starting
+        except asyncio.CancelledError:
+            if not signals:  # cancelamento de fora, não do Ctrl+C
+                raise
+            log.info("Início interrompido.")
+        else:
+            await cli.run()
     finally:
         try:
-            await client.stop()
+            await client.stop()  # sempre: o start() pode ter falhado ou sido cancelado no meio
         except Exception:
             log.exception("erro ao encerrar")
+        for sig in registered:
+            loop.remove_signal_handler(sig)
 
 
 def main(argv: list[str] | None = None) -> None:

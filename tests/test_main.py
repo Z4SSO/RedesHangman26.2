@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import signal
 
 import pytest
 
@@ -194,3 +196,152 @@ def test_a_missing_config_file_warns_and_uses_the_defaults(clean_logging, capsys
     m.setup_logging("INFO")
     cfg = m.build_config(m.parse_args(["--config", "/typo/config.json"]))
     assert cfg.namespace == "CIC" and "não encontrado" in capsys.readouterr().out
+
+
+# --- revisão 2: Ctrl+C durante o start() e saída forçada no segundo sinal ---
+
+
+def capture_signal_handlers(monkeypatch):
+    """Em vez de sinais de verdade, guarda o que run() registra no loop: handlers[SIGINT]() é o Ctrl+C."""
+    loop = asyncio.get_running_loop()
+    handlers = {}
+    monkeypatch.setattr(loop, "add_signal_handler", lambda sig, cb, *a: handlers.__setitem__(sig, cb))
+    monkeypatch.setattr(loop, "remove_signal_handler", lambda sig: True)
+    return handlers
+
+
+def default_cfg():
+    return m.build_config(m.parse_args(["--config", "/nonexistent.json"]))
+
+
+async def finishes_within(task, seconds=1.0):
+    """Espera SEM cancelar (o wait_for cancela a tarefa no timeout, e o run() engole esse
+    cancelamento depois de um sinal: o teste passaria sem o sinal ter feito nada)."""
+    done, _ = await asyncio.wait({task}, timeout=seconds)
+    return bool(done)
+
+
+async def test_ctrl_c_during_a_hanging_start_exits_and_still_stops(clean_logging, monkeypatch):
+    calls = []
+
+    class Client:
+        def __init__(self, cfg): pass
+        async def start(self):
+            calls.append("start")
+            await asyncio.sleep(30)  # Rendezvous fora do ar
+        async def stop(self): calls.append("stop")
+
+    class IdleCLI:
+        def __init__(self, client, set_level): pass
+        def request_quit(self): calls.append("quit")
+        async def run(self): calls.append("cli")
+
+    monkeypatch.setattr(m, "P2PClient", Client)
+    monkeypatch.setattr(m, "CLI", IdleCLI)
+    handlers = capture_signal_handlers(monkeypatch)
+    task = asyncio.create_task(m.run(default_cfg(), m.ScreenFilter()))
+    await asyncio.sleep(0.1)
+    handlers[signal.SIGINT]()  # o Ctrl+C
+    assert await finishes_within(task)  # termina em menos de 1 s, sem ajuda de ninguém
+    assert calls == ["start", "quit", "stop"]  # stop() sempre; a CLI nem chegou a rodar
+
+
+async def test_sigterm_during_the_start_behaves_like_ctrl_c(clean_logging, monkeypatch):
+    calls = []
+
+    class Client:
+        def __init__(self, cfg): pass
+        async def start(self): await asyncio.sleep(30)
+        async def stop(self): calls.append("stop")
+
+    class IdleCLI:
+        def __init__(self, client, set_level): pass
+        def request_quit(self): pass
+        async def run(self): calls.append("cli")
+
+    monkeypatch.setattr(m, "P2PClient", Client)
+    monkeypatch.setattr(m, "CLI", IdleCLI)
+    handlers = capture_signal_handlers(monkeypatch)
+    task = asyncio.create_task(m.run(default_cfg(), m.ScreenFilter()))
+    await asyncio.sleep(0.05)
+    handlers[signal.SIGTERM]()
+    assert await finishes_within(task)
+    assert calls == ["stop"]
+
+
+async def test_one_signal_while_the_cli_runs_quits_normally(clean_logging, monkeypatch):
+    calls = []
+    quit_event = asyncio.Event()
+
+    class Client:
+        def __init__(self, cfg): pass
+        async def start(self): calls.append("start")
+        async def stop(self): calls.append("stop")
+
+    class WaitingCLI:
+        def __init__(self, client, set_level): pass
+        def request_quit(self): quit_event.set()
+        async def run(self):
+            calls.append("cli")
+            await quit_event.wait()
+
+    monkeypatch.setattr(m, "P2PClient", Client)
+    monkeypatch.setattr(m, "CLI", WaitingCLI)
+    handlers = capture_signal_handlers(monkeypatch)
+    task = asyncio.create_task(m.run(default_cfg(), m.ScreenFilter()))
+    await asyncio.sleep(0.05)
+    handlers[signal.SIGINT]()
+    await asyncio.wait_for(task, 1)
+    assert calls == ["start", "cli", "stop"]
+
+
+async def test_two_signals_during_a_slow_stop_force_the_exit(clean_logging, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+
+    class Client:
+        def __init__(self, cfg): pass
+        async def start(self): pass
+        async def stop(self): await asyncio.sleep(30)  # BYE de 2 s por vizinho, em série
+
+    class QuickCLI:
+        def __init__(self, client, set_level): pass
+        def request_quit(self): pass
+        async def run(self): pass  # o usuário deu /quit
+
+    forced = []
+    monkeypatch.setattr(m, "P2PClient", Client)
+    monkeypatch.setattr(m, "CLI", QuickCLI)
+    handlers = capture_signal_handlers(monkeypatch)
+    task = asyncio.create_task(m.run(default_cfg(), m.ScreenFilter(), force_exit=lambda: forced.append(1)))
+    await asyncio.sleep(0.1)  # já dentro do stop() lento
+    handlers[signal.SIGINT]()
+    assert not forced  # o primeiro sinal só pede para sair
+    handlers[signal.SIGINT]()
+    assert forced == [1] and "saída forçada" in caplog.text
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_cancelling_run_from_outside_is_not_swallowed(clean_logging, monkeypatch):
+    calls = []
+
+    class Client:
+        def __init__(self, cfg): pass
+        async def start(self): await asyncio.sleep(30)
+        async def stop(self): calls.append("stop")
+
+    class IdleCLI:
+        def __init__(self, client, set_level): pass
+        def request_quit(self): pass
+        async def run(self): pass
+
+    monkeypatch.setattr(m, "P2PClient", Client)
+    monkeypatch.setattr(m, "CLI", IdleCLI)
+    capture_signal_handlers(monkeypatch)
+    task = asyncio.create_task(m.run(default_cfg(), m.ScreenFilter()))
+    await asyncio.sleep(0.05)
+    task.cancel()  # cancelamento de fora (sem sinal): precisa propagar, mas o stop() ainda roda
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == ["stop"]
