@@ -179,9 +179,15 @@ class PeerTable:
             self._entries[conn.peer_id] = entry
         if entry.conn is conn and entry.state == PeerState.CONNECTED:
             return
+        was_connected = entry.state == PeerState.CONNECTED
         entry.conn = conn
         entry.state = PeerState.CONNECTED
         entry.attempts, entry.next_retry = 0, None
+        if was_connected:
+            # troca de conexão do mesmo vizinho (desempate de duplicada): o
+            # vizinho nunca deixou de estar conectado, então não há evento
+            log.info("%s connection replaced (%s)", conn.peer_id, getattr(conn, "direction", "?"))
+            return
         log.info("%s CONNECTED (%s)", conn.peer_id, getattr(conn, "direction", "?"))
         await self._emit(EVENT_CONNECTED, conn.peer_id)
 

@@ -8,8 +8,17 @@ Especificação, "Transporte e Codificação":
 - linha que não é JSON válido: responde ERROR (bad_json) e fecha a conexão;
 - erro de leitura/escrita: conexão fechada imediatamente.
 
-Esta camada resolve sozinha HELLO/HELLO_OK, PING/PONG (via KeepAlive) e
-BYE/BYE_OK. Todo o resto sobe para o MessageRouter por `on_message`.
+Especificação, "Mensagens de sessão":
+- quem ABRE a conexão envia HELLO; quem aceita responde HELLO_OK (mesmo
+  msg_id). Até o HELLO_OK nenhuma outra mensagem é aceita;
+- conexões duplicadas: vale a conexão aberta pelo peer de MENOR peer_id; a
+  outra é fechada com BYE reason "duplicate";
+- BYE: quem envia espera BYE_OK por até 2 s e fecha o socket de qualquer jeito;
+  quem recebe responde BYE_OK e fecha.
+
+Esta camada resolve sozinha HELLO/HELLO_OK, PING/PONG (o PONG vai para o
+KeepAlive pelo gancho `on_pong`) e BYE/BYE_OK. Todo o resto sobe para o
+MessageRouter por `on_message`.
 """
 
 from __future__ import annotations
@@ -28,9 +37,13 @@ wire = logging.getLogger("Wire")
 OnMessage = Callable[["PeerConnection", dict], Awaitable[None]]
 OnClosed = Callable[["PeerConnection"], Awaitable[None]]
 OnConnected = Callable[["PeerConnection"], Awaitable[None]]
+OnPong = Callable[["PeerConnection", dict], None]
 
 CONNECT_TIMEOUT = 5.0  # abrir o socket de saída
+HELLO_TIMEOUT = 5.0  # esperar o HELLO / HELLO_OK
+BYE_TIMEOUT = 2.0  # esperar o BYE_OK (especificação)
 CLOSE_TIMEOUT = 1.0  # esperar o socket terminar de fechar
+DUPLICATE_GRACE = 2.0  # após BYE "duplicate", espera a conexão que vai substituir
 
 
 class PeerConnection:
@@ -59,12 +72,19 @@ class PeerConnection:
         self.remote_addr = f"{peer[0]}:{peer[1]}" if peer else "?"
         self.closed = False
         self._announced = False  # já passou por on_connected?
+        self._duplicate_bye = False  # o outro lado nos fechou com BYE "duplicate"
+        self._bye_ack = asyncio.Event()  # chegou o BYE_OK que esperamos
         self._write_lock = asyncio.Lock()
 
     @property
     def label(self) -> str:
         """Nome para os logs: peer_id se já conhecido, senão ip:porta."""
         return self.peer_id or self.remote_addr
+
+    @property
+    def supports_game(self) -> bool:
+        """O vizinho anunciou a feature "hangman" (senão não recebe lobby/partida)."""
+        return protocol.FEATURE_HANGMAN in self.features
 
     # --- escrita ------------------------------------------------------------
 
@@ -135,17 +155,91 @@ class PeerConnection:
             )
             return None
 
+    async def _read_until(self, msg_type: str, msg_id: str | None = None) -> dict | None:
+        """Handshake: lê até chegar `msg_type` (e `msg_id`, se dado), no máximo
+        HELLO_TIMEOUT s. Qualquer outra mensagem antes disso é descartada
+        ("até o HELLO_OK nenhuma outra mensagem é aceita")."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + HELLO_TIMEOUT
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            try:
+                msg = await asyncio.wait_for(self._read_message(), remaining)
+            except asyncio.TimeoutError:
+                return None
+            if msg is None:
+                return None
+            if msg.get("type") == msg_type and (msg_id is None or msg.get("msg_id") == msg_id):
+                return msg
+            log.debug("dropping %s from %s before %s", msg.get("type"), self.label, msg_type)
+
     async def _dispatch(self, msg: dict) -> None:
-        """Entrega a mensagem ao roteador. Erro no handler não derruba a conexão."""
+        """Trata os tipos de sessão aqui; o resto sobe para o roteador.
+
+        Erro no handler não derruba a conexão.
+        """
         try:
-            await self._server.on_message(self, msg)
+            type_ = msg.get("type")
+            if type_ in ("HELLO", "HELLO_OK"):
+                log.debug("ignoring repeated %s from %s", type_, self.label)
+            elif type_ == "PING":
+                await self._on_ping(msg)
+            elif type_ == "PONG":
+                self._on_pong(msg)
+            elif type_ == "BYE":
+                await self._on_bye(msg)
+            elif type_ == "BYE_OK":
+                self._bye_ack.set()
+            else:
+                await self._server.on_message(self, msg)
         except Exception:
             log.exception("handler failed for %s from %s", msg.get("type"), self.label)
+
+    def _valid_session_msg(self, msg: dict) -> bool:
+        """PING/PONG/BYE: envelope e campos obrigatórios conferem?"""
+        try:
+            protocol.validate_envelope(msg, self._server.cfg.peer_id)
+            return True
+        except protocol.ProtocolError as exc:
+            log.debug("dropping invalid %s from %s: %s", msg.get("type"), self.label, exc.message)
+            return False
+
+    async def _on_ping(self, msg: dict) -> None:
+        """PONG repete o msg_id e o timestamp do PING (especificação)."""
+        if self._valid_session_msg(msg):
+            await self.send(protocol.reply(msg, "PONG", timestamp=msg["timestamp"]))
+
+    def _on_pong(self, msg: dict) -> None:
+        if self._valid_session_msg(msg) and self._server.on_pong is not None:
+            self._server.on_pong(self, msg)  # KeepAlive.on_pong (01.5)
+
+    async def _on_bye(self, msg: dict) -> None:
+        """Quem recebe BYE responde BYE_OK e fecha o socket."""
+        if not self._valid_session_msg(msg):
+            return
+        reason = msg.get("reason")
+        log.info("BYE from %s (reason=%s)", self.label, reason)
+        self._duplicate_bye = reason == "duplicate"
+        await self.send(protocol.reply(msg, "BYE_OK"))
+        await self._abort()
 
     # --- fechamento ---------------------------------------------------------
 
     async def close(self, reason: str = "shutdown") -> None:
-        """Fecha a conexão. (A 01.4 acrescenta o BYE / BYE_OK antes disto.)"""
+        """BYE, espera BYE_OK por até 2 s, fecha o socket com ou sem resposta."""
+        if self.closed:
+            return
+        if self.peer_id is not None:
+            bye = protocol.new_message(
+                "BYE", src=self._server.cfg.peer_id, dst=self.peer_id, reason=reason
+            )
+            if await self.send(bye):
+                try:
+                    await asyncio.wait_for(self._bye_ack.wait(), BYE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    log.debug("no BYE_OK from %s within %.0f s", self.label, BYE_TIMEOUT)
         await self._abort()
 
     async def _abort(self) -> None:
@@ -177,9 +271,11 @@ class PeerServer:
         self.on_message = on_message
         self.on_closed = on_closed
         self.on_connected = on_connected
+        self.on_pong: OnPong | None = None  # KeepAlive.on_pong (01.5)
         self.port: int | None = None  # porta real (útil com listen_port=0 nos testes)
         self._server: asyncio.base_events.Server | None = None
         self._conns: set[PeerConnection] = set()
+        self._by_peer: dict[str, PeerConnection] = {}  # a conexão válida de cada vizinho
         self._tasks: set[asyncio.Task] = set()
         self._stopping = False
 
@@ -206,7 +302,11 @@ class PeerServer:
             await self._server.wait_closed()
 
     async def connect(self, ip: str, port: int) -> PeerConnection | None:
-        """Abre conexão de saída. None se falhar."""
+        """Abre conexão de saída e faz o HELLO.
+
+        None se falhar OU se perder o desempate de duplicada (nesse caso já
+        existe uma conexão válida com aquele vizinho).
+        """
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(ip, port, limit=protocol.MAX_LINE_BYTES),
@@ -217,9 +317,113 @@ class PeerServer:
             return None
         conn = PeerConnection(self, reader, writer, "outbound")
         self._conns.add(conn)
-        await self._ready(conn)
+        if not await self._hello_outbound(conn):
+            await conn._abort()
+            return None
+        kept = await self._establish(conn)
         self._spawn(conn._read_loop(), f"read {conn.label}")
+        if not kept:
+            self._spawn(conn.close("duplicate"), f"close {conn.label}")
+            return None
         return conn
+
+    # --- HELLO --------------------------------------------------------------
+
+    async def _hello_outbound(self, conn: PeerConnection) -> bool:
+        """Quem abre a conexão envia HELLO e espera o HELLO_OK de mesmo msg_id."""
+        hello = protocol.new_message(
+            "HELLO",
+            peer_id=self.cfg.peer_id,
+            version=protocol.PROTOCOL_VERSION,
+            features=[protocol.FEATURE_HANGMAN],
+        )
+        if not await conn.send(hello):
+            return False
+        reply = await conn._read_until("HELLO_OK", hello["msg_id"])
+        if reply is None:
+            log.warning("no HELLO_OK from %s; closing", conn.label)
+            return False
+        return self._accept_hello(conn, reply)
+
+    async def _hello_inbound(self, conn: PeerConnection) -> bool:
+        """Quem aceita espera o HELLO e responde HELLO_OK (mesmo msg_id)."""
+        hello = await conn._read_until("HELLO")
+        if hello is None:
+            log.warning("no HELLO from %s; closing", conn.label)
+            return False
+        if not self._accept_hello(conn, hello):
+            return False
+        ok = protocol.reply(
+            hello,
+            "HELLO_OK",
+            peer_id=self.cfg.peer_id,
+            version=protocol.PROTOCOL_VERSION,
+            features=[protocol.FEATURE_HANGMAN],
+        )
+        return await conn.send(ok)
+
+    def _accept_hello(self, conn: PeerConnection, msg: dict) -> bool:
+        """Valida o HELLO/HELLO_OK e guarda peer_id e features do vizinho."""
+        try:
+            protocol.validate_envelope(msg)
+        except protocol.ProtocolError as exc:
+            log.warning("invalid %s from %s: %s", msg.get("type"), conn.label, exc.message)
+            return False
+        peer_id = msg["peer_id"]
+        name, namespace = protocol.split_peer_id(peer_id)
+        if not name or not namespace:
+            log.warning("bad peer_id %r from %s", peer_id, conn.label)
+            return False
+        if peer_id == self.cfg.peer_id:
+            log.warning("%s claims to be me (%s); closing", conn.label, peer_id)
+            return False
+        if msg["version"] != protocol.PROTOCOL_VERSION:
+            log.warning("%s speaks protocol %s (expected %s)",
+                        peer_id, msg["version"], protocol.PROTOCOL_VERSION)
+        conn.peer_id = peer_id
+        conn.features = list(msg["features"])
+        return True
+
+    # --- duplicadas ---------------------------------------------------------
+
+    async def _establish(self, conn: PeerConnection) -> bool:
+        """Registra a conexão que acabou de concluir o HELLO.
+
+        True se ela é a válida daquele vizinho (e foi anunciada por
+        on_connected); False se perdeu o desempate de duplicada.
+        """
+        pid = conn.peer_id
+        existing = self._by_peer.get(pid)
+        if existing is not None and not existing.closed:
+            winner = self._duplicate_winner(existing, conn)
+            if winner is existing:
+                return False  # a recém-chegada perde; quem chamou fecha com BYE duplicate
+            # a nova vence: assume ANTES de fechar a antiga, para a PeerTable
+            # trocar de conexão sem gerar um peer_stale falso
+            self._by_peer[pid] = conn
+            await self._announce(conn)
+            self._spawn(existing.close("duplicate"), f"close {existing.label}")
+            return True
+        self._by_peer[pid] = conn
+        await self._announce(conn)
+        return True
+
+    def _duplicate_winner(self, old: PeerConnection, new: PeerConnection) -> PeerConnection:
+        """Vale a conexão aberta pelo peer de MENOR peer_id (especificação).
+
+        Se eu sou o menor, vale a minha de saída; senão, a de entrada. Os dois
+        lados chegam à mesma escolha sem conversar. Duas conexões da mesma
+        direção não são o caso de "abertura simultânea" (é o vizinho que
+        reconectou): fica a mais nova.
+        """
+        pid = new.peer_id
+        if old.direction == new.direction:
+            log.info("Replacing connection with %s (same direction, newer wins)", pid)
+            return new
+        keep = "outbound" if self.cfg.peer_id < pid else "inbound"
+        winner = old if old.direction == keep else new
+        log.info("Duplicate connection with %s — keeping %s (lower peer_id)", pid, keep)
+        return winner
 
     # --- interno ------------------------------------------------------------
 
@@ -233,22 +437,42 @@ class PeerServer:
         conn = PeerConnection(self, reader, writer, "inbound")
         self._conns.add(conn)
         try:
-            await self._ready(conn)
+            if not await self._hello_inbound(conn):
+                await conn._abort()
+                return
+            if not await self._establish(conn):
+                self._spawn(conn.close("duplicate"), f"close {conn.label}")
             await conn._read_loop()
         finally:
             if task is not None:
                 self._tasks.discard(task)
 
-    async def _ready(self, conn: PeerConnection) -> None:
+    async def _announce(self, conn: PeerConnection) -> None:
         """A conexão está pronta para uso: avisa quem assinou (PeerTable.attach)."""
         conn.state = PeerState.CONNECTED
         conn._announced = True
+        log.info("%s connected: %s (features=%s)",
+                 conn.direction.capitalize(), conn.peer_id, ",".join(conn.features))
         if self.on_connected is not None:
             await self._safe(self.on_connected, conn)
 
     async def _connection_closed(self, conn: PeerConnection) -> None:
+        """Uma conexão acabou. Só avisa on_closed se ela ainda era a válida do
+        vizinho (a duplicada descartada não conta como queda)."""
         self._conns.discard(conn)
-        if conn._announced and not self._stopping:
+        pid = conn.peer_id
+        if self._stopping or pid is None or not conn._announced:
+            return
+        if conn._duplicate_bye:
+            # O outro lado nos fechou por duplicada: a conexão vencedora pode
+            # ainda não ter chegado aqui. Dá um tempo para ela substituir esta;
+            # sem isso o host removeria o jogador por uma queda que não houve.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + DUPLICATE_GRACE
+            while self._by_peer.get(pid) is conn and loop.time() < deadline:
+                await asyncio.sleep(0.02)
+        if self._by_peer.get(pid) is conn:
+            del self._by_peer[pid]
             await self._safe(self.on_closed, conn)
 
     def _spawn(self, coro, name: str) -> None:

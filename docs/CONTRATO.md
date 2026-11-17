@@ -68,6 +68,9 @@ socket ──► PeerConnection ──(HELLO, PING/PONG, BYE tratados aqui)─�
 class PeerConnection:
     peer_id: str            # do outro lado, conhecido após o HELLO
     features: list[str]     # anunciadas no HELLO/HELLO_OK do outro lado (o roteador confere "hangman")
+    supports_game: bool     # True se `features` contém "hangman" (propriedade)
+    remote_addr: str        # "ip:porta" do outro lado, para logs
+    closed: bool            # já foi fechada
     direction: str          # "inbound" | "outbound"
     state: PeerState
     rtt_ms: float | None    # média móvel dos últimos 10 PING/PONG
@@ -79,6 +82,9 @@ class PeerConnection:
 `PeerServer(cfg, on_message, on_closed, on_connected)` com `start()`, `stop()` e `connect(ip, port) -> PeerConnection | None`. `on_connected(conn)` é chamado quando uma conexão (de entrada ou de saída) conclui o HELLO e venceu o desempate; `on_closed(conn)` quando ela cai. Na montagem, `on_connected = table.attach` e `on_closed = table.detach`.
 
 - Até o `HELLO_OK` (ou, para quem aceita, até o `HELLO`), **nenhuma outra mensagem é aceita**: A descarta e não sobe nada ao roteador. `on_message` só é chamado com a conexão já identificada (`peer_id` e `features` preenchidos).
+- `PeerServer.port` é a porta real em que escuta (útil com `listen_port=0` nos testes) e `PeerServer.on_pong` é o gancho `KeepAlive.on_pong(conn, msg)` (síncrono) que recebe todo `PONG` válido. `PING` é respondido pela própria conexão (`PONG` com o mesmo `msg_id` e `timestamp`).
+- Tempos: HELLO/HELLO_OK em até 5 s (senão fecha); `close()` espera o `BYE_OK` por até 2 s.
+- **Troca de conexão duplicada:** a vencedora é anunciada por `on_connected` **antes** de a perdedora ser fechada; `table.attach` troca a conexão sem emitir evento. A conexão fechada por um `BYE reason:"duplicate"` espera até 2 s pela substituta antes de chamar `on_closed`, para não gerar um `peer_stale` falso. `on_closed` só é chamado para a conexão que ainda era a válida do vizinho.
 - `connect()` devolve `None` se a conexão falhar **ou** se perder o desempate de duplicada (seção 6, item 1); nesse caso quem chamou não faz nada, porque já existe uma conexão válida para aquele vizinho.
 
 ### 5.2 `PeerTable` (A)

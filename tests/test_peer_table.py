@@ -250,3 +250,13 @@ async def test_close_all_cancels_pending_connects():
     await started.wait()
     await asyncio.wait_for(table.close_all(), 1)
     assert not table._tasks
+
+
+async def test_replacing_connection_of_connected_peer_emits_no_event():
+    table = PeerTable(CFG, FakeConnector())
+    events = recorder(table)
+    old, new = FakeConn("bob@CIC", "outbound"), FakeConn("bob@CIC", "inbound")
+    await table.attach(old)
+    await table.attach(new)  # desempate de duplicada: troca silenciosa
+    assert events == [(EVENT_CONNECTED, "bob@CIC")]  # um só, da primeira
+    assert table.connected() == [new]
