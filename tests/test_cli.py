@@ -41,11 +41,13 @@ class FakeClient:
         self.table = SimpleNamespace(connected=lambda: list(conns))
         self.reconciled = 0
         self.reconcile_error = None
+        self.reconcile_result = True
 
     async def reconcile_now(self):
         if self.reconcile_error:
             raise self.reconcile_error
         self.reconciled += 1
+        return self.reconcile_result
 
 
 @pytest.fixture
@@ -144,6 +146,15 @@ async def test_reconnect_forces_a_reconciliation():
     client = FakeClient()
     await make_cli(client).execute("/reconnect")
     assert client.reconciled == 1
+
+
+async def test_reconnect_does_not_claim_success_when_nothing_was_done(caplog):
+    caplog.set_level(logging.INFO)
+    client = FakeClient()
+    client.reconcile_result = False
+    await make_cli(client).execute("/reconnect")
+    text = " ".join(lines(caplog))
+    assert "Reconciliação não feita" in text and "concluída" not in text
 
 
 # --- /peers ---
