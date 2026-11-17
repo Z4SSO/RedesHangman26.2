@@ -94,10 +94,10 @@ async def test_commands_are_case_insensitive_and_extra_spaces_are_ignored(caplog
     assert any("bob@CIC" in m for m in lines(caplog))
 
 
-async def test_help_lists_the_17_commands_of_the_spec(caplog):
+async def test_help_lists_the_17_commands_of_the_spec_plus_chat(caplog):
     await make_cli().execute("/help")
     shown = [m for m in lines(caplog) if m.startswith("  /")]
-    assert len(HELP) == 17 and len(shown) == 17
+    assert len(HELP) == 18 and len(shown) == 18  # 17 da especificação + /chat (bônus)
     for usage, _ in HELP:
         assert any(m.strip().startswith(usage) for m in shown), usage
 
@@ -289,4 +289,4 @@ async def test_leave_tells_the_host_to_use_cancel(caplog):
 def test_help_is_the_only_command_list():
     from forca import cli
 
-    assert not hasattr(cli, "COMMANDS") and len(cli.HELP) == 17
+    assert not hasattr(cli, "COMMANDS") and len(cli.HELP) == 18

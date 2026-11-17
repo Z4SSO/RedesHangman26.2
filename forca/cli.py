@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from . import protocol as p
+from .protocol import CHAT_MAX_LEN
 from .hangman import normalize_word
 from .models import PlayerState
 from .rendezvous_connection import RendezvousError
@@ -25,7 +26,7 @@ from .rendezvous_connection import RendezvousError
 log = logging.getLogger("CLI")
 game_log = logging.getLogger("Game")
 
-# Os 17 comandos da especificação (seção "Interface de Usuário"): /create tem duas formas.
+# Os 17 comandos da especificação (seção "Interface de Usuário"; /create tem duas formas) + /chat (bônus 05.2).
 HELP = (
     ("/peers [* | #namespace]", "descobre e lista peers (padrão: namespace local)"),
     ("/conn", "lista as conexões ativas (entrada/saída, estado, RTT)"),
@@ -41,6 +42,7 @@ HELP = (
     ("/guess <letra>", "palpite de uma letra"),
     ("/word <palavra>", "palpite da palavra inteira"),
     ("/status", "mostra o estado local da partida"),
+    ("/chat <texto>", "bônus: envia uma mensagem a todos da partida"),
     ("/log <nível>", "ajusta o nível de log da tela (DEBUG, INFO, WARNING, ERROR)"),
     ("/help", "lista os comandos"),
     ("/quit", "encerra (LEAVE/GAME_OVER conforme o papel, BYE a todos, UNREGISTER)"),
@@ -76,7 +78,7 @@ class CLI:
             "/quit": self.cmd_quit,
             "/games": self.cmd_games, "/create": self.cmd_create, "/start": self.cmd_start,
             "/cancel": self.cmd_cancel, "/join": self.cmd_join, "/leave": self.cmd_leave,
-            "/guess": self.cmd_guess, "/word": self.cmd_word, "/status": self.cmd_status,
+            "/guess": self.cmd_guess, "/word": self.cmd_word, "/status": self.cmd_status, "/chat": self.cmd_chat,
         }
 
     # --- entrada ---
@@ -365,6 +367,20 @@ class CLI:
             raise UsageError("Palavra inválida: use só letras a-z, de 3 a 20.") from None
         self._require_playing()
         await self.client.player.guess_word(word)
+
+    async def cmd_chat(self, args: list[str]) -> None:
+        """/chat <texto>: bônus 05.2. O host difunde; o jogador envia ao host."""
+        if not args:
+            raise UsageError("uso: /chat <texto>")
+        text = " ".join(args)
+        if len(text) > CHAT_MAX_LEN:
+            raise UsageError(f"Mensagem longa demais: no máximo {CHAT_MAX_LEN} caracteres.")
+        if self.client.host.active:
+            await self.client.host.chat(text)
+        elif self.client.player.active:
+            await self.client.player.chat(text)
+        else:
+            raise UsageError("Você não está em uma partida.")
 
     def _require_playing(self) -> None:
         if self.client.player.state != PlayerState.PLAYING:
