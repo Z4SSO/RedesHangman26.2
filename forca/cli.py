@@ -8,14 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import sys
 import threading
 import time
+import unicodedata
+from pathlib import Path
 from typing import Awaitable, Callable
 
+from . import protocol as p
+from .hangman import normalize_word
+from .models import PlayerState
 from .rendezvous_connection import RendezvousError
 
 log = logging.getLogger("CLI")
+game_log = logging.getLogger("Game")
 
 COMMANDS = (
     "/peers", "/conn", "/rtt", "/reconnect", "/games", "/create", "/start",
@@ -45,6 +52,7 @@ HELP = (
 )
 
 MIN_DISCOVER_GAP = 2.0  # s entre DISCOVERs: o Rendezvous bloqueia acima de 50 req/min
+GAMES_TIMEOUT = 3.0  # s que o /games espera cada vizinho; quem não responde não trava o comando
 _STDIN = object()  # "use sys.stdin" (resolvido na hora de rodar, para os testes poderem trocá-lo)
 
 
@@ -63,10 +71,14 @@ class CLI:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._quit = False
         self._last_discover = float("-inf")
+        self.games_timeout = GAMES_TIMEOUT
         self._commands: dict[str, Callable[[list[str]], Awaitable[None]]] = {
             "/peers": self.cmd_peers, "/conn": self.cmd_conn, "/rtt": self.cmd_rtt,
             "/reconnect": self.cmd_reconnect, "/log": self.cmd_log, "/help": self.cmd_help,
             "/quit": self.cmd_quit,
+            "/games": self.cmd_games, "/create": self.cmd_create, "/start": self.cmd_start,
+            "/cancel": self.cmd_cancel, "/join": self.cmd_join, "/leave": self.cmd_leave,
+            "/guess": self.cmd_guess, "/word": self.cmd_word, "/status": self.cmd_status,
         }
 
     # --- entrada ---
@@ -186,6 +198,158 @@ class CLI:
         """/quit: sai do laço; quem chama o `run` encerra o cliente (main.run, no finally)."""
         log.info("Encerrando...")
         self._quit = True
+
+
+    # --- comandos de jogo ---
+    def _require_idle(self) -> None:
+        """Uma partida por vez (contrato 5.8); a parte B repete a checagem."""
+        if self.client.host.active or self.client.player.active:
+            raise UsageError("Você já está em uma partida (use /leave ou /cancel antes).")
+
+    def _hangman_peers(self) -> list[str]:
+        return [c.peer_id for c in self.client.table.connected() if p.FEATURE_HANGMAN in (c.features or [])]
+
+    async def _game_lists(self, peer_ids: list[str]) -> dict[str, list[dict]]:
+        """GAME_LIST a todos em paralelo; quem não responde (timeout) fica de fora."""
+        me = self.client.cfg.peer_id
+
+        async def ask(pid: str):
+            msg = p.new_message("GAME_LIST", src=me, dst=pid)
+            return await self.client.router.request(pid, msg, timeout=self.games_timeout)
+
+        replies = await asyncio.gather(*(ask(pid) for pid in peer_ids))
+        return {pid: [g for g in r["games"] if isinstance(g, dict)]
+                for pid, r in zip(peer_ids, replies) if r is not None}
+
+    async def cmd_games(self, args: list[str]) -> None:
+        """/games: GAME_LIST a todos os vizinhos com hangman e consolida as respostas."""
+        peers = self._hangman_peers()
+        if not peers:
+            log.info("Nenhum vizinho conectado com a feature hangman.")
+            return
+        found = [g for games in (await self._game_lists(peers)).values() for g in games]
+        if not found:
+            log.info("Nenhuma partida aberta (%d vizinho(s) consultado(s)).", len(peers))
+            return
+        log.info("Partidas:")
+        for g in sorted(found, key=lambda g: str(g.get("game_id"))):
+            tag = "" if g.get("status") == "OPEN" else f"  [{g.get('status')}]"
+            log.info("  %s  host=%s  %d/%s jogadores  %s letras  %s vidas%s", g.get("game_id"), g.get("host"),
+                     len(g.get("players") or []), g.get("max_players"), g.get("word_length"), g.get("lives"), tag)
+
+    async def _random_word(self) -> str:
+        path = Path(self.client.cfg.words_file)
+
+        def pick() -> str:
+            words = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    words.append(normalize_word(line))
+                except ValueError:
+                    continue  # linha vazia ou palavra fora da regra 2
+            if not words:
+                raise UsageError(f"{path} não tem palavras válidas (a-z, 3 a 20 letras).")
+            return random.choice(words)
+
+        try:
+            return await asyncio.to_thread(pick)
+        except OSError as exc:
+            raise UsageError(f"não consegui ler {path}: {exc.strerror}") from None
+
+    async def cmd_create(self, args: list[str]) -> None:
+        """/create <palavra> [max_players]  |  /create --random [max_players]"""
+        usage = "uso: /create <palavra> [max_players]  ou  /create --random [max_players]"
+        if not args:
+            raise UsageError(usage)
+        rest = args[1:]
+        if len(rest) > 1:
+            raise UsageError(usage)
+        max_players = None
+        if rest:
+            if not rest[0].isdigit():
+                raise UsageError(usage)
+            max_players = int(rest[0])
+        self._require_idle()
+        word = await self._random_word() if args[0] == "--random" else args[0]
+        try:
+            game_id = await self.client.host.create(word, max_players)
+        except ValueError as exc:
+            raise UsageError(f"não foi possível criar a partida: {exc}") from None
+        except RuntimeError:
+            raise UsageError("Você já está em uma partida (use /leave ou /cancel antes).") from None
+        log.info("Partida criada: %s. Aguardando jogadores; use /start quando houver pelo menos um.", game_id)
+
+    async def cmd_start(self, args: list[str]) -> None:
+        try:
+            await self.client.host.start()
+        except ValueError:
+            raise UsageError("A partida precisa de pelo menos 1 jogador para começar.") from None
+        except RuntimeError:
+            raise UsageError("Você não tem uma partida aberta para iniciar (use /create).") from None
+
+    async def cmd_cancel(self, args: list[str]) -> None:
+        if not self.client.host.active:
+            raise UsageError("Você não está hospedando uma partida.")
+        await self.client.host.cancel()
+        log.info("Partida cancelada.")
+
+    async def cmd_join(self, args: list[str]) -> None:
+        """/join <host_peer_id>: acha o game_id com um GAME_LIST e manda só o JOIN.
+        O JOIN não usa request(): o JOIN_ERR precisa chegar ao GamePlayer (contrato 5.4)."""
+        if len(args) != 1:
+            raise UsageError("uso: /join <host_peer_id>   (ex.: /join alice@CIC)")
+        host_id = args[0] if "@" in args[0] else f"{args[0]}@{self.client.cfg.namespace}"
+        self._require_idle()
+        if host_id not in self._hangman_peers():
+            raise UsageError(f"{host_id} não está conectado (veja /conn).")
+        games = (await self._game_lists([host_id])).get(host_id)
+        if games is None:
+            raise UsageError(f"{host_id} não respondeu ao GAME_LIST.")
+        # OPEN para entrar; RUNNING só adianta a quem volta (rejoin): o host decide.
+        game = next((g for status in ("OPEN", "RUNNING") for g in games if g.get("status") == status), None)
+        if game is None or not isinstance(game.get("game_id"), str):
+            raise UsageError(f"{host_id} não tem partida aberta.")
+        try:
+            await self.client.player.join(host_id, game["game_id"])
+        except RuntimeError:
+            raise UsageError("Você já está em uma partida (use /leave ou /cancel antes).") from None
+        log.info("Entrando na partida %s...", game["game_id"])
+
+    async def cmd_leave(self, args: list[str]) -> None:
+        if not self.client.player.active:
+            raise UsageError("Você não está em uma partida como jogador.")
+        await self.client.player.leave()
+        log.info("Você saiu da partida.")
+
+    async def cmd_guess(self, args: list[str]) -> None:
+        """/guess <letra>: valida uma letra a-z (acento é tirado) antes de enviar."""
+        if len(args) != 1:
+            raise UsageError("uso: /guess <letra>")
+        letter = "".join(c for c in unicodedata.normalize("NFKD", args[0].lower()) if not unicodedata.combining(c))
+        if len(letter) != 1 or not ("a" <= letter <= "z"):
+            raise UsageError("Letra inválida: use uma única letra de a a z.")
+        self._require_playing()
+        await self.client.player.guess_letter(letter)
+
+    async def cmd_word(self, args: list[str]) -> None:
+        """/word <palavra>: valida como a palavra secreta (a-z, 3 a 20) antes de enviar."""
+        if len(args) != 1:
+            raise UsageError("uso: /word <palavra>")
+        try:
+            word = normalize_word(args[0])
+        except ValueError:
+            raise UsageError("Palavra inválida: use só letras a-z, de 3 a 20.") from None
+        self._require_playing()
+        await self.client.player.guess_word(word)
+
+    def _require_playing(self) -> None:
+        if self.client.player.state != PlayerState.PLAYING:
+            raise UsageError("Você não está em uma partida em andamento.")
+
+    async def cmd_status(self, args: list[str]) -> None:
+        """/status: o host mostra a sua partida; senão o jogador mostra a dele."""
+        for line in self.client.host.status_lines() or self.client.player.status_lines():
+            game_log.info("%s", line.removeprefix("[Game] "))  # o logger já escreve [Game]
 
 
 def _rtt(conn) -> str:
