@@ -18,12 +18,13 @@ from typing import Callable
 
 from . import protocol as p
 from .config import Config
-from .hangman import Hangman, normalize_word, word_hash
+from .hangman import Hangman, clean_text, normalize_word, word_hash
 from .models import GameStatus, Sender
 from .protocol import GuessRejectReason as Reject
 from .protocol import JoinErrReason as JoinErr
 
 log = logging.getLogger("Host")
+game_log = logging.getLogger("Game")
 
 FINISHED_TTL = 60.0  # decisão 7 do contrato: GAME_LIST_OK mostra FINISHED por 60 s
 
@@ -250,6 +251,31 @@ class GameHost:
         if self.status == GameStatus.RUNNING:  # pode ter acabado durante o await
             await self._broadcast_state()
             self._log_turn()
+
+    # --- chat (bônus 05.2) ---
+    async def on_chat(self, conn, msg: dict) -> None:
+        """CHAT de um jogador: mostra e repassa aos outros com `from` (o src do repasse é o host)."""
+        src = msg["src"]
+        if not self.active or msg["game_id"] != self.game_id or src not in self._players:
+            await self._invalid_state(msg, "no such game or not a player")
+            return
+        await self._relay_chat(src, msg["text"], skip=src)
+
+    async def chat(self, text: str) -> None:
+        """O próprio host fala: vai a todos os jogadores."""
+        if not self.active:
+            game_log.warning("No game in progress")
+            return
+        await self._relay_chat(self.cfg.peer_id, text)
+
+    async def _relay_chat(self, author: str, raw: str, skip: str | None = None) -> None:
+        text = clean_text(raw, p.CHAT_MAX_LEN)
+        if not text:
+            return
+        game_log.info("%s: %s", "você" if author == self.cfg.peer_id else author, text)
+        for pl in list(self._players):
+            if pl != skip:
+                await self._send(pl, "CHAT", game_id=self.game_id, text=text, **{"from": author})
 
     # --- eventos da PeerTable ---
     async def on_peer_stale(self, peer_id: str) -> None:

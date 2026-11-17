@@ -12,7 +12,7 @@ from typing import Callable
 
 from . import protocol as p
 from .config import Config
-from .hangman import MAX_WORD, MIN_WORD, word_hash
+from .hangman import MAX_WORD, MIN_WORD, clean_text, word_hash
 from .models import PlayerState, Sender
 
 log = logging.getLogger("Player")
@@ -111,6 +111,27 @@ class GamePlayer:
         if self.state != PlayerState.PLAYING:
             game_log.warning("No game in progress")
         elif not await self._send("GUESS", game_id=self.game_id, **what):
+            game_log.warning("Host %s is not connected", self.host_id)
+
+    # --- chat (bônus 05.2) ---
+    async def on_chat(self, conn, msg: dict) -> None:
+        """CHAT repassado pelo host da partida atual; de qualquer outro é ignorado."""
+        if not self._mine(msg):
+            return
+        text = clean_text(msg["text"], p.CHAT_MAX_LEN)
+        if text:
+            game_log.info("%s: %s", clean_text(msg.get("from") or msg["src"], 40), text)
+
+    async def chat(self, text: str) -> None:
+        """Envia ao host, que difunde aos demais."""
+        text = clean_text(text, p.CHAT_MAX_LEN)
+        if not self.active:
+            game_log.warning("No game in progress")
+        elif not text:
+            return
+        elif await self._send("CHAT", game_id=self.game_id, text=text):
+            game_log.info("%s: %s", "você", text)
+        else:
             game_log.warning("Host %s is not connected", self.host_id)
 
     def status_lines(self) -> list[str]:

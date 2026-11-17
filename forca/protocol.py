@@ -37,8 +37,9 @@ LOBBY_TYPES = frozenset(
     }
 )
 GAME_TYPES = frozenset(
-    {"GAME_START", "STATE", "GUESS", "GUESS_RESULT", "GAME_OVER"}
+    {"GAME_START", "STATE", "GUESS", "GUESS_RESULT", "GAME_OVER", "CHAT"}  # CHAT: bônus 05.2
 )
+CHAT_MAX_LEN = 200
 ALL_TYPES = SESSION_TYPES | LOBBY_TYPES | GAME_TYPES
 
 # Campos obrigatórios NA RECEPÇÃO por tipo, além do envelope (type, msg_id, ttl,
@@ -80,6 +81,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "GUESS": ("game_id",),  # + exatamente um entre "letter" e "word"
     "GUESS_RESULT": ("game_id", "accepted"),
     "GAME_OVER": ("game_id", "result"),
+    "CHAT": ("game_id", "text"),  # bônus; `from` só no repasse do host
 }
 
 
@@ -98,6 +100,7 @@ FIELD_TYPES: dict[str, dict[str, str]] = {
     "JOIN_OK": {"game_id": "str", "players": "list_str", "rejoin": "bool"},
     "JOIN_ERR": {"game_id": "str", "reason": "str"},
     "LEAVE": {"game_id": "str"},
+    "CHAT": {"game_id": "str", "text": "str", "from": "str"},
     "LEAVE_OK": {"game_id": "str"},
     "GAME_START": {
         "game_id": "str",

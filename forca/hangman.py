@@ -24,6 +24,13 @@ def normalize_word(raw: str) -> str:
     return word
 
 
+def clean_text(raw: str, max_len: int = 200) -> str:
+    """Texto de chat seguro para tela e log: caracteres de controle (\\n, ESC...) viram
+    espaço, as pontas são aparadas e o resultado é cortado em `max_len`."""
+    text = "".join(" " if unicodedata.category(c).startswith("C") else c for c in raw)
+    return text.strip()[:max_len]
+
+
 def word_hash(normalized_word: str) -> str:
     """SHA-256 hexadecimal minúsculo da palavra já normalizada."""
     return hashlib.sha256(normalized_word.encode("utf-8")).hexdigest()
