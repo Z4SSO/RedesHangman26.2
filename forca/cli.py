@@ -189,8 +189,10 @@ class CLI:
         """/reconnect: reconciliação imediata com o Rendezvous (mesmo limite do /peers)."""
         self._rendezvous_gap()
         log.info("Reconciliando com o Rendezvous...")
-        await self.client.reconcile_now()
-        log.info("Reconciliação concluída.")
+        if await self.client.reconcile_now():
+            log.info("Reconciliação concluída.")
+        else:  # intervalo de 5 s do cliente ou DISCOVER que falhou
+            log.warning("Reconciliação não feita (muito cedo ou o Rendezvous não respondeu).")
 
     async def cmd_log(self, args: list[str]) -> None:
         """/log <nível>: troca o nível da tela sem reiniciar."""
