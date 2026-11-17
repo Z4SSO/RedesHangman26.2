@@ -5,8 +5,9 @@ Logger: "Client".
 
 O P2PClient cria todos os objetos e os expõe como atributos (a CLI da C usa
 `client.table`, `client.host`, `client.player`...). A parte de rede é ligada
-aqui; a parte do jogo é ligada pela função `wire(client)` que a Pessoa C passa
-no construtor (ver CONTRATO.md, seção 5.9).
+aqui; a ligação do jogo ao roteador e à tabela é `game_wiring.wire_game`, da
+Pessoa C (ver CONTRATO.md, seção 5.9). Sinais (Ctrl+C) são tratados pelo
+`main.py`, que chama `client.stop()`.
 
 Especificação, "Componentes de um peer": tarefas periódicas = DISCOVER a cada
 N s (reconcilia a PeerTable e conecta nos novos) e refresh do registro antes
@@ -18,13 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 from dataclasses import replace
-from typing import Callable
 
 from .config import Config
-from .game_host import GameHost
-from .game_player import GamePlayer
+from .game_wiring import wire_game
 from .keep_alive import KeepAlive
 from .message_router import MessageRouter
 from .peer_connection import PeerConnection, PeerServer
@@ -35,32 +33,32 @@ log = logging.getLogger("Client")
 
 MANUAL_RECONNECT_MIN_INTERVAL = 5.0  # /reconnect não pode estourar o limite do Rendezvous
 
-Wire = Callable[["P2PClient"], None]
-
 
 class P2PClient:
-    def __init__(self, cfg: Config, wire: Wire | None = None) -> None:
+    def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
-        self._wire = wire
-        # --- rede (A) ---
+        # Tudo é criado aqui (e não no start()) para o stop() ser seguro mesmo
+        # que o start() falhe ou seja cancelado no meio.
         self.rdv = RendezvousConnection(cfg)
         self.keep_alive = KeepAlive(cfg)
-        self.router = MessageRouter(cfg.peer_id)
+        self.table = PeerTable(cfg, self._connect)
+        self.router = MessageRouter(cfg.peer_id, self.table.send_to)
+        # jogo (B) ligado ao roteador e à tabela pela função da C
+        self.host, self.player = wire_game(cfg, self.table, self.router)
         self.server = PeerServer(cfg, self.router.on_message, self._on_closed, self._on_connected)
         self.server.on_pong = self.keep_alive.on_pong
-        self.table = PeerTable(cfg, self.server.connect)
-        # --- jogo (B): falam com a rede só pelo Sender (table.send_to) ---
-        self.host = GameHost(cfg, self.table.send_to, busy=lambda: self.player.active)
-        self.player = GamePlayer(cfg, self.table.send_to, busy=lambda: self.host.active)
+        self.server.on_bad_line = self.router.on_bad_line
 
         self._registered = False
-        self._started = False
         self._tasks: list[asyncio.Task] = []  # tarefas periódicas, canceladas no stop()
         self._stop_task: asyncio.Task | None = None
-        self._stopped = asyncio.Event()
         self._last_manual = float("-inf")
 
     # --- ligações de rede ----------------------------------------------------
+
+    async def _connect(self, ip: str, port: int) -> PeerConnection | None:
+        """`connect_fn` da PeerTable (o servidor é criado depois da tabela)."""
+        return await self.server.connect(ip, port)
 
     async def _on_connected(self, conn: PeerConnection) -> None:
         """Conexão pronta: começa a vigiar (PING) e avisa a PeerTable."""
@@ -73,19 +71,17 @@ class P2PClient:
     # --- início -------------------------------------------------------------
 
     async def start(self) -> None:
-        """Ordem: ligar o jogo (wire) -> PeerServer.start -> REGISTER -> tarefas.
+        """Ordem: PeerServer.start -> REGISTER -> tarefas periódicas.
 
         Falha ao escutar (porta ocupada) é fatal e propaga. Rendezvous fora do
         ar NÃO é: o peer sobe, avisa no log e o laço de DISCOVER tenta
-        registrar de novo a cada intervalo.
+        registrar de novo a cada intervalo. Nenhum `except` aqui engole o
+        CancelledError (o main cancela o start() no primeiro Ctrl+C).
         """
-        if self._wire is not None:
-            self._wire(self)  # handlers do jogo no router e eventos da table (C)
         await self.server.start()
         if self.cfg.listen_port == 0:  # porta efêmera (testes): registra a real
             self.cfg = replace(self.cfg, listen_port=self.server.port)
             self.rdv.cfg = self.cfg
-        self._started = True
         await self._register()
         self._tasks = [
             asyncio.create_task(self._discover_loop(), name="discover loop"),
@@ -152,7 +148,7 @@ class P2PClient:
             except Exception:
                 log.exception("refresh loop error")
 
-    async def reconnect_now(self) -> bool:
+    async def reconcile_now(self) -> bool:
         """`/reconnect`: DISCOVER + reconciliação imediatos e tentativa já dos
         peers STALE. No máximo uma vez a cada 5 s, para o usuário não conseguir
         estourar o limite do Rendezvous repetindo o comando."""
@@ -175,10 +171,6 @@ class P2PClient:
         """
         await asyncio.shield(self._ensure_stop_task())
 
-    async def wait_stopped(self) -> None:
-        """Espera o encerramento terminar (para o main.py)."""
-        await self._stopped.wait()
-
     def _ensure_stop_task(self) -> asyncio.Task:
         if self._stop_task is None:
             self._stop_task = asyncio.create_task(self._shutdown(), name="shutdown")
@@ -198,14 +190,14 @@ class P2PClient:
         await self._step("player.leave", self.player.leave())
         # 3. BYE a todos os vizinhos (espera BYE_OK até 2 s, em paralelo)
         await self._step("table.close_all", self.table.close_all("shutdown"))
-        # 4. UNREGISTER no Rendezvous
-        if self._started:
+        # 4. UNREGISTER no Rendezvous (só se estamos registrados: com o servidor
+        #    fora do ar ou travado não há o que remover, e o Ctrl+C não espera)
+        if self._registered:
             await self._step("rdv.unregister", self.rdv.unregister())
         # 5. tarefas de PING e servidor TCP
         await self._step("keep_alive.stop", self.keep_alive.stop())
         await self._step("server.stop", self.server.stop())
         log.info("stopped")
-        self._stopped.set()
 
     @staticmethod
     async def _step(name: str, coro) -> None:
@@ -215,16 +207,3 @@ class P2PClient:
             raise
         except Exception as exc:
             log.warning("shutdown step %s failed: %r", name, exc)
-
-    def install_signal_handlers(self) -> None:
-        """`Ctrl+C` (SIGINT) e SIGTERM disparam o mesmo `stop()` do `/quit`."""
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, self._on_signal, sig)
-            except (NotImplementedError, RuntimeError):
-                pass  # Windows ou fora da thread principal
-
-    def _on_signal(self, sig: signal.Signals) -> None:
-        log.info("received %s: shutting down", sig.name)
-        self._ensure_stop_task()

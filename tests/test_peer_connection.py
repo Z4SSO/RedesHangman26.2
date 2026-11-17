@@ -87,17 +87,59 @@ async def test_huge_line_closes_that_connection_but_not_the_server():
         await wait_for(lambda: len(b.messages) == 1)
 
 
-async def test_invalid_json_gets_error_bad_json_and_close():
+async def test_bad_line_before_hello_just_closes_without_on_bad_line():
+    """Antes do HELLO o vizinho não tem peer_id: só fecha, sem ERROR e sem gancho."""
     async with Node("bob") as b:
+        hook_calls = []
+
+        async def hook(conn, exc):
+            hook_calls.append(exc)
+
+        b.server.on_bad_line = hook
         reader, writer = await asyncio.open_connection("127.0.0.1", b.server.port)
         writer.write(b"isto nao e json\n")
         await writer.drain()
-        line = await asyncio.wait_for(reader.readline(), 2)
-        reply = json.loads(line)
+        assert await asyncio.wait_for(reader.read(), 2) == b""  # fechou, sem nenhum ERROR
+        writer.close()
+        assert hook_calls == [] and b.messages == [] and b.connected == []
+
+
+async def _hello(reader, writer, peer_id="alice@CIC"):
+    writer.write(protocol.encode(protocol.new_message(
+        "HELLO", peer_id=peer_id, version="1.0", features=["hangman"])))
+    await writer.drain()
+    return json.loads(await asyncio.wait_for(reader.readline(), 2))
+
+
+async def test_bad_line_after_hello_calls_on_bad_line_then_closes():
+    async with Node("bob") as b:
+        calls = []
+
+        async def hook(conn, exc):
+            calls.append((conn.peer_id, type(exc).__name__))
+
+        b.server.on_bad_line = hook
+        reader, writer = await asyncio.open_connection("127.0.0.1", b.server.port)
+        assert (await _hello(reader, writer))["type"] == "HELLO_OK"
+        writer.write(b"{quebrado\n")
+        await writer.drain()
+        assert await asyncio.wait_for(reader.read(), 2) == b""  # o gancho não enviou nada; fechou
+        writer.close()
+        assert calls == [("alice@CIC", "ProtocolError")]
+        await wait_for(lambda: len(b.closed) == 1)
+
+
+async def test_bad_line_after_hello_without_hook_answers_error_bad_json():
+    async with Node("bob") as b:
+        reader, writer = await asyncio.open_connection("127.0.0.1", b.server.port)
+        await _hello(reader, writer)
+        writer.write(b"{quebrado\n")
+        await writer.drain()
+        reply = json.loads(await asyncio.wait_for(reader.readline(), 2))
         assert reply["type"] == "ERROR" and reply["code"] == "bad_json"
+        assert reply["dst"] == "alice@CIC" and reply["src"] == "bob@CIC"
         assert await asyncio.wait_for(reader.read(), 2) == b""
         writer.close()
-        assert b.messages == []
 
 
 async def test_other_side_closing_triggers_on_closed():

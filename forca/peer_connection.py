@@ -38,6 +38,7 @@ OnMessage = Callable[["PeerConnection", dict], Awaitable[None]]
 OnClosed = Callable[["PeerConnection"], Awaitable[None]]
 OnConnected = Callable[["PeerConnection"], Awaitable[None]]
 OnPong = Callable[["PeerConnection", dict], None]
+OnBadLine = Callable[["PeerConnection", Exception], Awaitable[None]]
 
 CONNECT_TIMEOUT = 5.0  # abrir o socket de saída
 HELLO_TIMEOUT = 5.0  # esperar o HELLO / HELLO_OK
@@ -144,16 +145,26 @@ class PeerConnection:
             return protocol.decode(raw)
         except protocol.ProtocolError as exc:
             log.warning("bad JSON from %s (%s); closing", self.label, exc.message)
-            await self.send(
-                protocol.new_message(
-                    "ERROR",
-                    src=self._server.cfg.peer_id,
-                    dst=self.peer_id,
-                    code=protocol.ErrorCode.BAD_JSON,
-                    message=exc.message,
-                )
-            )
-            return None
+            await self._answer_bad_line(exc)
+            return None  # quem chama fecha a conexão
+
+    async def _answer_bad_line(self, exc: protocol.ProtocolError) -> None:
+        """Linha que não é JSON. ANTES do HELLO o vizinho ainda não tem peer_id
+        (um ERROR sairia sem `dst`): só se fecha a conexão. DEPOIS do HELLO,
+        quem responde `ERROR bad_json` é o roteador, pelo gancho `on_bad_line`
+        (se não houver gancho, respondemos aqui mesmo)."""
+        if self.peer_id is None:
+            return
+        hook = self._server.on_bad_line
+        try:
+            if hook is not None:
+                await hook(self, exc)
+            else:
+                await self.send(protocol.new_message(
+                    "ERROR", src=self._server.cfg.peer_id, dst=self.peer_id,
+                    code=protocol.ErrorCode.BAD_JSON, message=exc.message))
+        except Exception:
+            log.exception("on_bad_line failed for %s", self.label)
 
     async def _read_until(self, msg_type: str, msg_id: str | None = None) -> dict | None:
         """Handshake: lê até chegar `msg_type` (e `msg_id`, se dado), no máximo
@@ -279,6 +290,7 @@ class PeerServer:
         self.on_closed = on_closed
         self.on_connected = on_connected
         self.on_pong: OnPong | None = None  # KeepAlive.on_pong (01.5)
+        self.on_bad_line: OnBadLine | None = None  # MessageRouter.on_bad_line: ERROR bad_json (só após o HELLO)
         self.port: int | None = None  # porta real (útil com listen_port=0 nos testes)
         self._server: asyncio.base_events.Server | None = None
         self._conns: set[PeerConnection] = set()

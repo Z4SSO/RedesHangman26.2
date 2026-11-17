@@ -113,13 +113,16 @@ async def test_ephemeral_port_registers_the_real_port():
         await c.stop()
 
 
-async def test_wire_is_called_once_with_the_client():
-    calls = []
+async def test_game_is_wired_to_router_and_table_by_the_client():
+    """O cliente chama o wire_game da C: handlers no roteador, eventos na tabela."""
+    from forca.game_wiring import HOST_HANDLERS, PLAYER_HANDLERS
     async with FakeRdv() as rdv:
-        c = P2PClient(rdv.cfg("alice"), wire=calls.append)
-        await c.start()
-        assert calls == [c]
-        await c.stop()
+        c = P2PClient(rdv.cfg("alice"))
+        assert set(HOST_HANDLERS) | set(PLAYER_HANDLERS) <= set(c.router._handlers)
+        # host e jogador usam a PeerTable como Sender e o busy cruzado (contrato 5.8)
+        assert c.router.send == c.table.send_to
+        assert c.host.active is False and c.player.active is False
+        assert c.server.on_bad_line == c.router.on_bad_line
 
 
 # --- encerramento ------------------------------------------------------------
@@ -177,7 +180,6 @@ async def test_stop_twice_at_the_same_time_shuts_down_once():
     async with FakeRdv() as rdv:
         (c,) = await start_all(rdv, "alice")
         await asyncio.gather(c.stop(), c.stop())
-        await asyncio.wait_for(c.wait_stopped(), 1)
         assert rdv.requests.count("UNREGISTER") == 1
 
 
@@ -245,12 +247,94 @@ async def test_normal_use_costs_about_three_requests_per_minute():
     assert discovers_per_min + refreshes_per_min < 4  # ≈ 3 req/min, longe das 50
 
 
-async def test_reconnect_now_is_rate_limited():
+async def test_reconcile_now_is_rate_limited():
     async with FakeRdv() as rdv:
         (c,) = await start_all(rdv, "alice", discover_interval=30)
         await until(lambda: "DISCOVER" in rdv.requests)
         before = rdv.requests.count("DISCOVER")
-        assert await c.reconnect_now() is True
-        assert await c.reconnect_now() is False  # 2º em seguida é ignorado
+        assert await c.reconcile_now() is True
+        assert await c.reconcile_now() is False  # 2º em seguida é ignorado
         assert rdv.requests.count("DISCOVER") == before + 1
         await c.stop()
+
+
+# --- garantias que a C pediu à parte A (contrato 5.9) ----------------------------
+
+
+async def test_duplicate_connection_never_fires_peer_stale_or_peer_gone():
+    """`wire_game` trata todo peer_stale como queda: fechar a conexão duplicada
+    não pode disparar evento. Várias rodadas, com os dois lados descobrindo um
+    ao outro ao mesmo tempo (é quando nascem as conexões duplicadas)."""
+    for _ in range(4):
+        async with FakeRdv() as rdv:
+            a, b = (P2PClient(rdv.cfg(n, discover_interval=0.05)) for n in ("alice", "bob"))
+            events = []
+            for c in (a, b):
+                for ev in ("peer_stale", "peer_gone", "peer_connected"):
+                    async def cb(pid, ev=ev, me=c.cfg.name):
+                        events.append((me, ev, pid))
+                    c.table.subscribe(ev, cb)
+            await asyncio.gather(a.start(), b.start())
+            await until(lambda: len(a.table.connected()) == 1 and len(b.table.connected()) == 1)
+            await asyncio.sleep(0.4)  # sobra tempo para a duplicada ser fechada e ruídos aparecerem
+            assert [e for e in events if e[1] != "peer_connected"] == []
+            # um peer_connected por lado: a troca de duplicada é silenciosa
+            assert sorted(events) == [("alice", "peer_connected", "bob@CIC"),
+                                      ("bob", "peer_connected", "alice@CIC")]
+            assert len(a.table.connected()) == 1 and len(b.table.connected()) == 1
+            await stop_all(a, b)
+
+
+async def test_stop_without_start_is_safe():
+    async with FakeRdv() as rdv:
+        c = P2PClient(rdv.cfg("alice"))
+        await asyncio.wait_for(c.stop(), 2)  # nada foi criado pelo start(): não levanta
+        assert rdv.requests == []  # e não fala com o Rendezvous (nunca registrou)
+
+
+async def test_stop_is_safe_when_start_failed_on_a_busy_port():
+    busy = await asyncio.start_server(lambda r, w: None, "0.0.0.0", 0)
+    port = busy.sockets[0].getsockname()[1]
+    try:
+        async with FakeRdv() as rdv:
+            c = P2PClient(rdv.cfg("alice", listen_port=port))
+            with pytest.raises(OSError):
+                await c.start()  # porta ocupada: falha fatal
+            await asyncio.wait_for(c.stop(), 2)
+    finally:
+        busy.close()
+        await busy.wait_closed()
+
+
+async def test_start_cancelled_propagates_cancelled_error_and_stop_is_safe():
+    """O main cancela o start() no 1º Ctrl+C: o CancelledError tem de passar, e o
+    stop() logo depois (no finally do main) não pode levantar nem deixar nada."""
+    reached = asyncio.Event()
+
+    async def silent(reader, writer):  # Rendezvous que aceita e nunca responde
+        reached.set()
+        await asyncio.sleep(30)
+
+    server = await asyncio.start_server(silent, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    before = asyncio.all_tasks()
+    try:
+        c = P2PClient(Config(name="alice", namespace="CIC", rdv_host="127.0.0.1", rdv_port=port,
+                             listen_port=0))
+        starting = asyncio.ensure_future(c.start())
+        await asyncio.wait_for(reached.wait(), 2)  # o start() está no REGISTER, pendurado
+        starting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await starting
+        started = asyncio.get_running_loop().time()
+        await asyncio.wait_for(c.stop(), 12)
+        # nunca registrou: não tenta UNREGISTER num servidor que não responde (esperaria 5 s)
+        assert asyncio.get_running_loop().time() - started < 1.0
+        await asyncio.sleep(0.05)
+        mine = ("discover", "register", "ping", "read", "connect", "retry", "close", "shutdown")
+        leftover = [t.get_name() for t in asyncio.all_tasks() - before
+                    if t is not asyncio.current_task() and not t.done()
+                    and t.get_name().startswith(mine)]
+        assert leftover == []  # nenhuma tarefa do cliente sobrou
+    finally:
+        server.close()
