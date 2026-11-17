@@ -69,6 +69,9 @@ socket ──► PeerConnection ──(HELLO, PING/PONG, BYE tratados aqui)─�
 class PeerConnection:
     peer_id: str            # do outro lado, conhecido após o HELLO
     features: list[str]     # anunciadas no HELLO/HELLO_OK do outro lado (o roteador confere "hangman")
+    supports_game: bool     # True se `features` contém "hangman" (propriedade)
+    remote_addr: str        # "ip:porta" do outro lado, para logs
+    closed: bool            # já foi fechada
     direction: str          # "inbound" | "outbound"
     state: PeerState
     rtt_ms: float | None    # média móvel dos últimos 10 PING/PONG
@@ -77,23 +80,37 @@ class PeerConnection:
     async def close(self, reason: str = "shutdown")  # BYE, espera BYE_OK ≤ 2 s, fecha
 ```
 
-`PeerServer(cfg, on_message, on_closed)` com `start()`, `stop()` e `connect(ip, port) -> PeerConnection | None`.
+`PeerServer(cfg, on_message, on_closed, on_connected)` com `start()`, `stop()` e `connect(ip, port) -> PeerConnection | None`. `on_connected(conn)` é chamado quando uma conexão (de entrada ou de saída) conclui o HELLO e venceu o desempate; `on_closed(conn)` quando ela cai. Na montagem, `on_connected = table.attach` e `on_closed = table.detach`.
 
 - Até o `HELLO_OK` (ou, para quem aceita, até o `HELLO`), **nenhuma outra mensagem é aceita**: A descarta e não sobe nada ao roteador. `on_message` só é chamado com a conexão já identificada (`peer_id` e `features` preenchidos).
+- `PeerServer.port` é a porta real em que escuta (útil com `listen_port=0` nos testes) e `PeerServer.on_pong` é o gancho `KeepAlive.on_pong(conn, msg)` (síncrono) que recebe todo `PONG` válido. `PING` é respondido pela própria conexão (`PONG` com o mesmo `msg_id` e `timestamp`).
+- **Linha que não é JSON:** depois do HELLO, o `PeerServer` chama `await server.on_bad_line(conn, exc)` (ligado a `router.on_bad_line`, que responde `ERROR bad_json`) e **depois** fecha a conexão; sem o gancho, ele mesmo responde o `ERROR`. **Antes** do HELLO só fecha, sem `ERROR` e sem chamar o gancho (o vizinho ainda não tem `peer_id`, e o `ERROR` sairia sem `dst`).
+- Tempos: HELLO/HELLO_OK em até 5 s (senão fecha); `close()` espera o `BYE_OK` por até 2 s.
+- **Troca de conexão duplicada:** a vencedora é anunciada por `on_connected` **antes** de a perdedora ser fechada; `table.attach` troca a conexão sem emitir evento. A conexão fechada por um `BYE reason:"duplicate"` espera até 2 s pela substituta antes de chamar `on_closed`, para não gerar um `peer_stale` falso. `on_closed` só é chamado para a conexão que ainda era a válida do vizinho.
 - `connect()` devolve `None` se a conexão falhar **ou** se perder o desempate de duplicada (seção 6, item 1); nesse caso quem chamou não faz nada, porque já existe uma conexão válida para aquele vizinho.
 
 ### 5.2 `PeerTable` (A)
 
 ```python
+table = PeerTable(cfg, connect_fn)     # connect_fn = PeerServer.connect (async (ip, port) -> conn | None)
 table.subscribe(event, callback)       # callback: async def cb(peer_id: str)
 table.state_of(peer_id) -> PeerState | None
+table.peers() -> list[PeerEntry]       # todas as entradas (/peers): peer_id, ip, port, state, conn, attempts, next_retry
 table.connected() -> list[PeerConnection]
 await table.send_to(peer_id, msg) -> bool      # implementa Sender
 await table.broadcast(msg_factory)             # msg_factory(peer_id) -> dict
 await table.reconcile(discovered: list[dict])  # resultado do DISCOVER
+await table.attach(conn); await table.detach(conn)   # chamados pelo PeerServer (A)
+await table.close_all(reason="shutdown")       # BYE a todos + cancela conexões pendentes (/quit)
+table.retry_now()                             # /reconnect: tenta já os STALE (síncrono)
 ```
 
 Eventos: `peer_connected`, `peer_stale`, `peer_gone`. **`peer_stale` é o gatilho de falha**: o host remove o jogador; o jogador, se era o host, aborta a partida. `peer_gone` também deve ser tratado como queda.
+
+- **Reconexão com backoff (01.6):** peer `STALE` (caiu ou não respondeu à conexão) é tentado de novo após `base_backoff × 2^n` s, limitado a `max_backoff` (padrão: 2, 4, 8, 16, 32 s). Depois de `max_reconnect_attempts` reconexões sem sucesso vira `GONE` (evento `peer_gone`) até reaparecer num `DISCOVER`. Conectar de novo (por nós ou por conexão de entrada do vizinho) zera a contagem. A espera usa `asyncio.sleep` em tarefa própria: não atrasa os outros peers. `table.retry_now()` (para o `/reconnect`) tenta já todos os `STALE` e recomeça a contagem deles.
+- `peer_stale` só é emitido quando cai uma conexão que estava `CONNECTED`. Falha na primeira tentativa de conexão deixa o peer `STALE` (para o backoff da 01.6) **sem** evento.
+- Depois de `close_all()` nenhum evento é emitido (o `/quit` não dispara a lógica de queda do jogo).
+- Callback que levanta exceção é registrado no log e não impede os outros.
 
 ### 5.3 `RendezvousConnection` (A)
 
@@ -103,7 +120,22 @@ await rdv.discover(namespace=None) -> list[dict]   # SEM o próprio peer
 await rdv.unregister() -> None
 ```
 
-Lança `RendezvousError(message)` quando `status == "ERROR"`. Uma conexão TCP por comando. Intervalo mínimo entre chamadas: o `discover_interval` (nunca em laço sem pausa: o servidor bloqueia o IP por 1 min acima de 50 req/min).
+`RendezvousConnection(cfg, timeout=5.0)`. Lança `RendezvousError` com `.message` igual ao `message` do servidor quando `status == "ERROR"` (ex.: `peer_not_registered`, texto do bloqueio). Falhas de rede também viram `RendezvousError`, com `.message` `"timeout"`, `"connection_failed"` ou `"bad_response"`, para quem chama tratar um tipo só. Conectar e ler a resposta têm `timeout` cada. Uma conexão TCP por comando. Intervalo mínimo entre chamadas: o `discover_interval` (nunca em laço sem pausa: o servidor bloqueia o IP por 1 min acima de 50 req/min).
+
+### 5.3.1 `KeepAlive` (A)
+
+```python
+ka = KeepAlive(cfg)
+ka.watch(conn)                  # começa a enviar PING a cada cfg.ping_interval (o 1º sai na hora)
+ka.on_pong(conn, msg)           # síncrono; ligado em PeerServer.on_pong
+ka.unwatch(conn)
+await ka.stop()                 # cancela todas as tarefas de PING
+```
+
+- RTT = recepção do `PONG` − envio do `PING` casado por `msg_id` (relógio monotônico); `conn.rtt_ms` é a média dos últimos 10. Log do RTT em **DEBUG** (`[KeepAlive] bob@CIC RTT=41.7 ms (avg 43.2 ms)`): com um PING por vizinho a cada 30 s, em INFO ele poluiria a tela durante a partida; aparece no `--log-file`.
+- Após `ping_miss_limit` (3) PINGs seguidos sem `PONG`: `WARNING [KeepAlive] X missed 3 PINGs — marking STALE`, `conn.state = STALE` e `conn.close("idle", wait_ack=False)`. O fechamento chega ao `on_closed` e daí à `PeerTable.detach`, que emite `peer_stale` uma única vez. Não espera o `BYE_OK` (o peer já não responde).
+- **Ligação (C/01.7):** `server.on_pong = ka.on_pong`; o `on_connected` do servidor chama `ka.watch(conn)` e depois `table.attach(conn)`. Não é preciso `unwatch` no `on_closed`: a tarefa termina sozinha quando a conexão fecha. `ka.stop()` entra no `P2PClient.stop()`.
+- `PeerConnection.close(reason, wait_ack=True)`: com `wait_ack=False` envia o `BYE` e fecha na hora.
 
 ### 5.4 `MessageRouter` (C)
 
@@ -225,11 +257,12 @@ client.rdv: RendezvousConnection        # /peers usa client.rdv.discover(namespa
 client.table: PeerTable                 # /conn e /rtt usam table.connected()
 client.router: MessageRouter            # /games usa router.request(...)
 client.host: GameHost; client.player: GamePlayer
-await client.start(); await client.stop()
-await client.reconcile_now()            # /reconnect: DISCOVER + reconcile imediatos
+client.server: PeerServer; client.keep_alive: KeepAlive
+await client.start(); await client.stop()    # stop() é idempotente (chamadas simultâneas esperam o mesmo encerramento)
+await client.reconcile_now() -> bool    # /reconnect: DISCOVER + reconcile + table.retry_now(); no máx. 1 a cada 5 s
 ```
 
-Em `__init__`/`start()`, nesta ordem: `table = PeerTable()` → `router = MessageRouter(cfg.peer_id, table.send_to)` → `host, player = wire_game(cfg, table, router)` → `PeerServer(cfg, on_message=router.on_message, ...)`. Os callbacks de `table.subscribe` são uma **lista** por evento (o `wire_game` assina `peer_stale` duas vezes: host e jogador).
+Em `__init__`, nesta ordem: `table = PeerTable(cfg, connect_fn)` (5.2) → `router = MessageRouter(cfg.peer_id, table.send_to)` → `host, player = wire_game(cfg, table, router)` → `PeerServer(cfg, on_message=router.on_message, on_closed=table.detach, on_connected=...)` com `server.on_bad_line = router.on_bad_line` e `server.on_pong = keep_alive.on_pong`. Em `on_connected`: `keep_alive.watch(conn)` e depois `table.attach(conn)`. O `connect_fn` da tabela é `server.connect` (ligado depois que o servidor existe). Os callbacks de `table.subscribe` são uma **lista** por evento (o `wire_game` assina `peer_stale` duas vezes: host e jogador).
 
 `stop()` segue a seção 8: `await host.shutdown()` e `await player.leave()` **antes** do `BYE`. O `main` chama `client.stop()` no `finally`, inclusive depois de `Ctrl+C` e de `/quit`.
 
@@ -241,6 +274,10 @@ Em `__init__`/`start()`, nesta ordem: `table = PeerTable()` → `router = Messag
 - O `main` cancela o `client.start()` no primeiro `Ctrl+C`/SIGTERM; o `start()` deve deixar o `CancelledError` propagar (sem engoli-lo em um `except Exception`/`BaseException`).
 
 `PeerConnection` (5.1) precisa expor `peer_id`, `features`, `direction`, `state`, `rtt_ms` e `send`: a CLI e o roteador leem esses atributos.
+
+**Início e tarefas periódicas (A):** `start()` faz `PeerServer.start` → `REGISTER` → tarefas. `DISCOVER` a cada `discover_interval` (o primeiro logo após o `REGISTER`) e refresh do registro a cada `register_ttl / 2`. Em `peer_not_registered`: `REGISTER` de novo e repete o `DISCOVER` uma vez (6.9). Se o `DISCOVER` falhar por qualquer motivo, a tabela **não** é reconciliada (senão todos virariam `GONE` por uma falha do servidor). Nenhum laço roda sem `asyncio.sleep`, nem quando dá erro: com os padrões são ≈ 3 req/min por peer. Rendezvous fora do ar não derruba o peer: ele sobe, avisa no log e tenta registrar de novo a cada intervalo. `client.cfg.listen_port` é a porta real mesmo se o config pedir 0.
+
+**Sinais:** quem instala os handlers de `Ctrl+C`/SIGTERM é o `main.py` (C); o `P2PClient` não trata sinais, só expõe `stop()`.
 
 ## 6. Decisões já tomadas (onde a especificação deixa margem)
 
@@ -262,7 +299,7 @@ Se o professor responder diferente, altere aqui e avise.
 14. **`GAME_START` ou `STATE` de `src` que não é o host do jogador** (ou de `game_id` diferente do atual): o jogador ignora e responde `ERROR invalid_state`. Mensagem de partida de peer sem `"hangman"` é descartada pelo roteador sem resposta.
 15. **`GUESS` de quem não é jogador da partida** (e `GUESS` sem partida `RUNNING`): `GUESS_RESULT accepted:false reason:"game_not_running"` se há partida do host mas não está `RUNNING`; `ERROR invalid_state` se o host não tem partida alguma ou o `src` não está nela.
 16. **Palpite de letra com mais de um caractere ou fora de `a-z`**: `GUESS_RESULT reason:"invalid_letter"`. Letra maiúscula é normalizada para minúscula antes de checar.
-17. **Sem cliente de referência nem `forca-bot`:** a interoperabilidade (cenário 11 e issue 04.6) é testada entre **os próprios clientes do grupo**, em máquinas diferentes quando possível, e o que não puder ser verificado contra um cliente de terceiros é registrado como tal na entrega.
+17. **Interoperabilidade (cenário 11 e issue 04.6):** testada contra o **bot oficial** (`bot@CIC`, ver seção 9) e entre os próprios clientes do grupo. O cliente de referência `pyp2p-forca` não foi disponibilizado, então host/jogador contra um cliente de terceiros completo só foi exercitado do lado jogador (contra o bot). Em 17/11 o cliente da parte A descobriu o bot, conectou, entrou no lobby e jogou uma partida inteira até `GAME_OVER LOST`, com o hash da palavra conferido (`hash OK`) e sem nenhum aviso no log.
 
 18. **Sem `STATE` final** na vitória ou derrota: o `GAME_OVER` vem logo depois do `GUESS_RESULT` da última jogada, como no "Exemplo Completo de Sessão" da especificação.
 19. **Todo `GAME_OVER` do host passa por `FINISHED`** (60 s, depois `IDLE`): `WON`, `LOST` e `ABORTED` (`host_shutdown` e `no_players`), como no diagrama e na decisão 12. Só o `/quit` (`shutdown`) limpa tudo na hora.
@@ -289,6 +326,7 @@ Na tela: `INFO` ou acima, mais tudo de `CLI` e `Game`. No arquivo (`--log-file`)
 
 ## 8. Ordem de encerramento (`/quit`)
 
+0. Cancela as tarefas periódicas (nenhum `DISCOVER` ou refresh no meio do encerramento).
 1. Se for host com partida ativa: `GAME_OVER ABORTED` (`reason: host_shutdown`) a todos os jogadores.
 2. Se for jogador em partida: `LEAVE` ao host.
 3. `BYE` a todos os vizinhos; aguarda `BYE_OK` até 2 s por conexão.
@@ -300,7 +338,7 @@ Na tela: `INFO` ou acima, mais tudo de `CLI` e `Game`. No arquivo (`--log-file`)
 Anote a resposta ao lado e depois mova para a seção 6.
 
 - [ ] `/cancel` deve mesmo usar `reason: "host_shutdown"`? (a especificação só lista `host_shutdown` e `no_players`)
-- [x] O `forca-bot` e o cliente de referência estão disponíveis em qual endereço/namespace? (`FORCA`) **Resposta (15/11): não existem.** O repositório `mfcaetano/pyp2p-rdv` só contém o servidor Rendezvous (`pyp2p.mfcaetano.cc:8080`). Ver decisão 17.
+- [x] O `forca-bot` e o cliente de referência estão disponíveis em qual endereço/namespace? **Resposta (17/11, comunicado do professor): existe o bot dos monitores**, registrado no Rendezvous público como `bot@CIC` em `45.171.101.167:8081` (namespace `CIC`, **não** `FORCA`). Política do bot: até 4 jogadores, 6 vidas, turno de 30 s; o 1º `JOIN` inicia 10 s de espera (lotou, começa na hora); 3 timeouts seguidos removem o jogador com `BYE reason:"idle"`; jogador removido recebe `JOIN_ERR game_running` até o próximo lobby; `FINISHED` fica anunciado 60 s e depois abre novo lobby com novo `game_id` (quem quiser jogar de novo precisa dar `JOIN`). **O cliente de referência `pyp2p-forca` continua sem ser disponibilizado.** Ver decisão 17.
 - [x] Onde obter `words.txt`, `config.json` oficiais e o roteiro de testes? **Resposta (15/11): não existem.** Usamos o `words.txt` e o `config.json` de exemplo do repositório; o roteiro é a seção "Cenários de Teste Mínimos" da especificação. Se o professor publicar versões oficiais, substituir.
 - [ ] Há apresentação ou só entrega de código? O que entregar (repositório, relatório, vídeo)?
 - [ ] Política de uso de IA no trabalho.
