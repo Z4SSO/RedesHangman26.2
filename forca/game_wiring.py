@@ -13,6 +13,7 @@ from .config import Config
 from .game_host import GameHost
 from .game_player import GamePlayer
 from .hangman import choose_word
+from .models import PeerState
 from .peer_table import EVENT_CONNECTED, EVENT_GONE, EVENT_STALE
 
 # Contrato, seção 5.4: quem trata cada tipo.
@@ -44,7 +45,8 @@ def wire_game(cfg: Config, table, router) -> tuple[GameHost, GamePlayer]:
     host: GameHost
     player: GamePlayer
     host = GameHost(cfg, table.send_to, busy=lambda: player.active)
-    player = GamePlayer(cfg, table.send_to, busy=lambda: host.active)
+    player = GamePlayer(cfg, table.send_to, busy=lambda: host.active,
+                        host_alive=lambda pid: table.state_of(pid) == PeerState.CONNECTED)
 
     async def on_chat(conn, msg):  # bônus 05.2: um só tipo para os dois papéis (exclusão mútua)
         await (host.on_chat if host.active else player.on_chat)(conn, msg)

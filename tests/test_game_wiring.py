@@ -23,6 +23,10 @@ class FakeTable:
 
     def __init__(self, net, peer_id):
         self.net, self.peer_id, self.subs = net, peer_id, {}
+        self.states: dict = {}
+
+    def state_of(self, peer_id):
+        return self.states.get(peer_id)
 
     def subscribe(self, event, callback):
         self.subs.setdefault(event, []).append(callback)
@@ -292,3 +296,14 @@ async def test_with_migration_off_the_other_players_abort(net):
     assert not bob.player.active and not carol.player.active and not bob.host.active
     for n in nodes:
         await n.host.shutdown()
+
+
+async def test_wire_game_gives_the_player_a_host_alive_bound_to_the_table(net):
+    from forca.models import PeerState
+
+    node = Node(net, "bob", host_migration=True)
+    assert node.player.host_alive("alice@CIC") is False  # a tabela não conhece o peer
+    node.table.states["alice@CIC"] = PeerState.CONNECTED
+    assert node.player.host_alive("alice@CIC") is True
+    node.table.states["alice@CIC"] = PeerState.STALE
+    assert node.player.host_alive("alice@CIC") is False

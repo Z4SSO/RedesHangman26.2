@@ -27,12 +27,15 @@ MIGRATION_TIMEOUT = 30.0
 
 
 class GamePlayer:
-    def __init__(self, cfg: Config, send: Sender, busy: Callable[[], bool] = lambda: False) -> None:
+    def __init__(self, cfg: Config, send: Sender, busy: Callable[[], bool] = lambda: False,
+                 host_alive: Callable[[str], bool] = lambda _: False) -> None:
         """`busy()` diz se este peer já é host de uma partida (exclusão mútua, contrato 5.8);
-        quem liga os objetos passa `busy=lambda: host.active`."""
+        quem liga os objetos passa `busy=lambda: host.active`. `host_alive(peer_id)` diz se a
+        conexão com aquele peer está de pé (bônus 05.1): `wire_game` liga à PeerTable."""
         self.cfg = cfg
         self.send = send
         self.busy = busy
+        self.host_alive = host_alive
         # (host, game_id, campos do GAME_START, instante da queda) guardados para o rejoin
         self._last_game: tuple[str, str, dict, float] | None = None
         # Bônus 05.1: `async (game_id, outros_jogadores, vidas)`; quem liga define (wire_game).
@@ -190,7 +193,8 @@ class GamePlayer:
     async def on_game_start(self, conn, msg: dict) -> None:
         if (self.cfg.host_migration and self.state == PlayerState.PLAYING
                 and msg.get("game_id") == self.game_id and msg.get("src") != self.host_id
-                and msg.get("src") == self._successor(self.host_id)):
+                and msg.get("src") == self._successor(self.host_id)
+                and not self.host_alive(self.host_id)):  # host ainda conectado: não dividir a partida
             log.info("New host %s took over game %s", msg["src"], self.game_id)
             self.host_id = msg["src"]  # a queda do host antigo ainda não chegou até nós
         if not self._mine(msg):

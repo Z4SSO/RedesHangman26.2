@@ -362,9 +362,10 @@ async def test_full_game_win_between_host_and_two_players():
 from forca import game_player  # noqa: E402
 
 
-def migrating(name, players, enabled=True):
+def migrating(name, players, enabled=True, alive=lambda _: False, **cfg):
     sender = FakeSender()
-    pl = GamePlayer(Config(name=name, namespace="CIC", host_migration=enabled), sender)
+    pl = GamePlayer(Config(name=name, namespace="CIC", host_migration=enabled, **cfg), sender,
+                    host_alive=alive)
     pl.taken = []
 
     async def take(gid, others, lives):
@@ -474,3 +475,30 @@ async def test_a_failing_takeover_aborts_without_crashing(caplog):
     await playing_as(pl, "bob@CIC", PLAYERS)
     await pl.on_peer_stale(HOST)
     assert not pl.active and "Could not take over the game" in caplog.text
+
+
+# --- revisão do PR 12, item 1: não trocar de host se o host antigo ainda está conectado ---
+
+
+async def test_successor_game_start_is_refused_while_the_old_host_is_still_connected():
+    pl, sender = migrating("dave", PLAYERS, alive=lambda pid: pid == HOST)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_game_start(None, incoming(
+        "GAME_START", "bob@CIC", "dave@CIC", game_id=GID, players=["carol@CIC", "dave@CIC"], lives=5,
+        word_length=4, word_hash=word_hash("casa"), turn_timeout=30))
+    assert pl.host_id == HOST and pl.lives == 6 and pl.masked == "______"
+    assert sender.of_type("ERROR")[-1]["code"] == "invalid_state"  # decisão 14
+    await pl.on_state(None, incoming(  # o STATE do host vivo continua valendo: sem partida dividida
+        "STATE", HOST, "dave@CIC", game_id=GID, seq=2, masked="b_____", wrong_letters=[], lives=6,
+        turn="bob@CIC", players=PLAYERS, last_guess=None))
+    assert pl.seq == 2 and pl.masked == "b_____"
+    assert len(sender.of_type("ERROR")) == 1
+
+
+async def test_successor_game_start_is_accepted_when_the_old_host_is_not_connected():
+    pl, _ = migrating("dave", PLAYERS, alive=lambda pid: False)
+    await playing_as(pl, "dave@CIC", PLAYERS)
+    await pl.on_game_start(None, incoming(
+        "GAME_START", "bob@CIC", "dave@CIC", game_id=GID, players=["carol@CIC", "dave@CIC"], lives=5,
+        word_length=4, word_hash=word_hash("casa"), turn_timeout=30))
+    assert pl.host_id == "bob@CIC" and pl.lives == 5
