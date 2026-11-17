@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import time
 from typing import Callable
 
 from . import protocol as p
@@ -35,9 +36,15 @@ class GameHost:
         self.send = send
         self.busy = busy
         self._expire_task: asyncio.Task | None = None
+        self._turn_task: asyncio.Task | None = None  # o timer mais recente
+        # Todo timer vivo, inclusive o que já foi substituído mas ainda está difundindo:
+        # é o que _reset/_close cancelam (toda tarefa é guardada e cancelada no stop()).
+        self._turn_tasks: set[asyncio.Task] = set()
+        self._turn_started = 0.0
         self._reset()
 
     def _reset(self) -> None:
+        self._cancel_turn_timer()
         self.status = GameStatus.IDLE
         self.game_id: str | None = None
         self._game: Hangman | None = None
@@ -136,6 +143,23 @@ class GameHost:
             "max_players": self._max_players, "lives": self._game.lives,
             "word_length": self._game.word_length,
         }
+
+    def status_lines(self) -> list[str]:
+        """Linhas do /status do host, no formato mínimo da especificação ([] sem partida)."""
+        if self.status == GameStatus.IDLE:
+            return []
+        g = self._game
+        lines = [
+            f"[Game] {self.game_id}  (host: {self.cfg.peer_id})  status: {self.status.value}",
+            f"[Game] Palavra: {' '.join(g.masked)} (secreta: {g.word})     "
+            f"Vidas: {g.lives} / {self.cfg.lives}     "
+            f"Erradas: {', '.join(g.wrong_letters) or '-'}",
+        ]
+        who = f"[Game] Jogadores: {', '.join(self._players) or '-'}"
+        if self.status == GameStatus.RUNNING:
+            left = max(0, int(self.cfg.turn_timeout - (time.monotonic() - self._turn_started)))
+            who += f"   Vez de: {self._turn}  — {left} s restantes"
+        return lines + [who]
 
     # --- handlers de mensagens (registrados no MessageRouter) ---
     async def on_game_list(self, conn, msg: dict) -> None:
@@ -248,11 +272,45 @@ class GameHost:
         if self.status != GameStatus.RUNNING:
             return
         self._seq += 1
+        self._restart_turn_timer()  # o relógio do turno recomeça a cada STATE
         fields = self._state_fields()
         for pl in list(self._players):
             if self.status != GameStatus.RUNNING:
                 break  # a partida acabou no meio da difusão
             await self._send(pl, "STATE", **fields)
+
+    def _cancel_turn_timer(self) -> None:
+        self._turn_task = None
+        # O timer que estourou chama _broadcast_state, que reinicia o timer: ele não pode
+        # cancelar a si mesmo no meio da difusão. Se o shutdown chegar durante ela, quem
+        # cancela é o outro lado (a tarefa atual então é a do shutdown, não a do timer).
+        for task in list(self._turn_tasks):
+            if task is not asyncio.current_task():
+                task.cancel()
+
+    def _restart_turn_timer(self) -> None:
+        """Só o timer mais recente vale (`_turn_task`); todos ficam em `_turn_tasks`."""
+        self._cancel_turn_timer()
+        self._turn_started = time.monotonic()
+        self._turn_task = task = asyncio.create_task(self._turn_timer(self._seq))
+        self._turn_tasks.add(task)
+        task.add_done_callback(self._turn_tasks.discard)
+
+    async def _turn_timer(self, seq: int) -> None:
+        """Regra 7: sem jogada em `turn_timeout` s, passa o turno (sem custar vida) e difunde
+        STATE com last_guess {player, timeout: true}. Só age se nada mudou desde o `seq`."""
+        await asyncio.sleep(self.cfg.turn_timeout)
+        if self.status != GameStatus.RUNNING or self._seq != seq:
+            return
+        try:
+            log.info("Turn timeout for %s — skipping", self._turn)
+            self._last_guess = {"player": self._turn, "timeout": True}
+            self._advance_turn()  # a mesma rotina de uma jogada aceita
+            await self._broadcast_state()
+            if self.status == GameStatus.RUNNING:  # pode ter acabado durante a difusão
+                self._log_turn()
+        except Exception:  # um timer morto travaria a partida em silêncio
+            log.exception("turn timer failed")
 
     def _log_turn(self) -> None:
         log.info("Turn: %s (timeout %d s)", self._turn, self.cfg.turn_timeout)
@@ -295,8 +353,10 @@ class GameHost:
             f" by {winner}" if winner else f" ({reason})" if reason else "",
         )
         self._turn = None
+        self._cancel_turn_timer()
         self._cancel_expire()
-        # Todo término, inclusive ABORTED, passa por FINISHED (60 s) e depois IDLE (decisão 12).
+        # Todo término, inclusive ABORTED, passa por FINISHED (60 s) e depois IDLE (decisão 19;
+        # a 12 trata do caso no_players).
         self.status = GameStatus.FINISHED
         self._expire_task = asyncio.create_task(self._expire(self.game_id))
         return players, over
