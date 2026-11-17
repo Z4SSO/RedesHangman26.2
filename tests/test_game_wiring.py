@@ -1,0 +1,144 @@
+"""Integração em memória: roteador real + GameHost/GamePlayer reais + tabela falsa."""
+
+import pytest
+
+from forca import protocol as p
+from forca.config import Config
+from forca.game_wiring import HOST_HANDLERS, PLAYER_HANDLERS, wire_game
+from forca.message_router import MessageRouter
+from forca.models import GameStatus, PlayerState
+from forca.peer_table import EVENT_CONNECTED, EVENT_GONE, EVENT_STALE
+
+
+class FakeConn:
+    def __init__(self, peer_id, features=("hangman",)):
+        self.peer_id, self.features = peer_id, list(features)
+
+    async def send(self, msg):
+        return True
+
+
+class FakeTable:
+    """Só o que o wire_game usa: subscribe e send_to (que entrega ao outro nó)."""
+
+    def __init__(self, net, peer_id):
+        self.net, self.peer_id, self.subs = net, peer_id, {}
+
+    def subscribe(self, event, callback):
+        self.subs.setdefault(event, []).append(callback)
+
+    async def fire(self, event, peer_id):
+        for cb in self.subs.get(event, []):
+            await cb(peer_id)
+
+    async def send_to(self, peer_id, msg):
+        node = self.net.get(peer_id)
+        if node is None or peer_id in self.net.down:
+            return False
+        p.validate_envelope(msg, peer_id)  # rígido ao enviar
+        await node.router.on_message(FakeConn(self.peer_id, node.features_of_sender), msg)
+        return True
+
+
+class Node:
+    def __init__(self, net, name, features=("hangman",)):
+        self.cfg = Config(name=name, namespace="CIC")
+        self.id = self.cfg.peer_id
+        self.features_of_sender = features  # o que os OUTROS veem deste nó no HELLO
+        self.table = FakeTable(net, self.id)
+        self.router = MessageRouter(self.id, self.table.send_to)
+        self.host, self.player = wire_game(self.cfg, self.table, self.router)
+        net[self.id] = self
+
+
+class Net(dict):
+    down: set = set()
+
+
+@pytest.fixture
+def net():
+    n = Net()
+    n.down = set()
+    return n
+
+
+@pytest.fixture
+async def trio(net):
+    alice, bob, carol = Node(net, "alice"), Node(net, "bob"), Node(net, "carol")
+    yield alice, bob, carol
+    for n in (alice, bob, carol):
+        await n.host.shutdown()
+
+
+def test_every_game_type_of_the_contract_is_registered(net):
+    node = Node(net, "alice")
+    assert set(node.router._handlers) == set(HOST_HANDLERS) | set(PLAYER_HANDLERS)
+    assert set(node.table.subs) == {EVENT_STALE, EVENT_GONE, EVENT_CONNECTED}
+
+
+async def test_games_request_goes_through_the_router(trio):
+    alice, bob, _ = trio
+    await alice.host.create("casa", 2)
+    req = p.new_message("GAME_LIST", src=bob.id, dst=alice.id)
+    reply = await bob.router.request(alice.id, req)
+    assert reply["type"] == "GAME_LIST_OK" and reply["games"][0]["game_id"] == alice.host.game_id
+
+
+async def test_full_game_through_routers(trio):
+    alice, bob, carol = trio
+    gid = await alice.host.create("casa")
+    await bob.player.join(alice.id, gid)
+    await carol.player.join(alice.id, gid)
+    await alice.host.start()
+    assert bob.player.state == PlayerState.PLAYING and carol.player.seq == 1
+    await bob.player.guess_letter("c")
+    await carol.player.guess_letter("a")
+    await bob.player.guess_letter("s")
+    assert not bob.player.active and not carol.player.active
+    assert alice.host.status == GameStatus.FINISHED
+
+
+async def test_stale_and_gone_remove_the_player_and_abort_the_host_side(trio):
+    alice, bob, carol = trio
+    gid = await alice.host.create("banana")
+    await bob.player.join(alice.id, gid)
+    await carol.player.join(alice.id, gid)
+    await alice.host.start()
+    await alice.table.fire(EVENT_STALE, carol.id)  # queda de jogador
+    assert alice.host._players == [bob.id]
+    await bob.table.fire(EVENT_GONE, alice.id)  # peer_gone também vale como queda do host
+    assert not bob.player.active
+
+
+async def test_peer_connected_triggers_the_rejoin(trio):
+    alice, bob, carol = trio
+    gid = await alice.host.create("banana")
+    await bob.player.join(alice.id, gid)
+    await carol.player.join(alice.id, gid)
+    await alice.host.start()
+    await carol.table.fire(EVENT_STALE, alice.id)  # carol perde o host
+    await alice.table.fire(EVENT_STALE, carol.id)  # e o host perde a carol
+    assert not carol.player.active and alice.host._players == [bob.id]
+    await carol.table.fire(EVENT_CONNECTED, alice.id)  # reconectaram
+    assert carol.player.state == PlayerState.PLAYING
+    assert alice.host._players == [bob.id, carol.id]
+
+
+async def test_mutual_exclusion_is_wired_in_both_directions(trio):
+    alice, bob, _ = trio
+    await alice.host.create("casa")
+    with pytest.raises(RuntimeError):  # host ativo: não entra como jogador
+        await alice.player.join(bob.id, "bob@CIC/00000000")
+    gid = alice.host.game_id
+    await bob.player.join(alice.id, gid)
+    with pytest.raises(RuntimeError):  # jogador ativo: não cria partida
+        await bob.host.create("gato")
+
+
+async def test_game_messages_from_a_peer_without_hangman_are_ignored(net, trio):
+    alice, bob, _ = trio
+    await alice.host.create("casa")
+    stranger = FakeConn("dave@CIC", features=())
+    join = p.new_message("JOIN", src="dave@CIC", dst=alice.id, game_id=alice.host.game_id)
+    await alice.router.on_message(stranger, join)
+    assert alice.host.describe()["players"] == []
