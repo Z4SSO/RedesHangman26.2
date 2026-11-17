@@ -165,9 +165,14 @@ await host.start()          # exige >= 1 jogador (ValueError se não)
 await host.cancel()
 await host.shutdown()       # no /quit
 host.describe() -> dict | None        # item de games[] do GAME_LIST_OK
+host.status_lines() -> list[str]      # texto do /status do host; [] se não há partida
 # handlers: on_game_list, on_join, on_leave, on_guess   (async, (conn, msg))
 # evento:   on_peer_stale(peer_id)
 ```
+
+- **`/status` (C):** mostrar `host.status_lines()` se não for vazio; senão, `player.status_lines()`. As linhas já vêm com o prefixo `[Game]`. O host também mostra a palavra secreta (só ele a conhece).
+- **Timeout de turno:** o host mantém um timer de `turn_timeout` s, reiniciado a cada `STATE`. Ao estourar, passa o turno sem custar vida e difunde `STATE` com `last_guess {"player", "timeout": true}`. O timer é cancelado em todo fim de partida e no `shutdown()`; não há nada para a C ligar.
+- `turn_timeout` é **inteiro >= 1**, validado em `config.load_config` (o `GAME_START` exige inteiro no `protocol`, e 0 faria o timer estourar sem parar).
 
 ### 5.7 `GamePlayer` (B)
 
@@ -254,3 +259,4 @@ Anote a resposta ao lado e depois mova para a seção 6.
 - [x] Onde obter `words.txt`, `config.json` oficiais e o roteiro de testes? **Resposta (15/11): não existem.** Usamos o `words.txt` e o `config.json` de exemplo do repositório; o roteiro é a seção "Cenários de Teste Mínimos" da especificação. Se o professor publicar versões oficiais, substituir.
 - [ ] Há apresentação ou só entrega de código? O que entregar (repositório, relatório, vídeo)?
 - [ ] Política de uso de IA no trabalho.
+- [ ] **Quando o relógio do turno reinicia?** Hoje reinicia a cada `STATE` (como a issue 02.5 pede), então o `LEAVE`, a queda ou o rejoin de *outro* jogador dá tempo extra a quem está na vez. A especificação fala em "não jogar em `turn_timeout` segundos", ou seja, um tempo por turno. Para seguir a especificação, reiniciar só quando o turno muda, com uma ficha própria (contador de turnos) no lugar do `seq` na checagem do timer. **Decisão do grupo.**

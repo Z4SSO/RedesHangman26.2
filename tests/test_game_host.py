@@ -461,3 +461,155 @@ async def test_stale_player_removed_then_rejoin(host, sender):
     ok = sender.of_type("JOIN_OK")[0]
     assert ok["rejoin"] is True and ok["players"] == ["bob@CIC", "carol@CIC"]
     assert sender.of_type("STATE", to="carol@CIC")[0]["players"] == ["bob@CIC", "carol@CIC"]
+
+
+# --- 02.5: timeout de turno (cenário 6) e queda na vez do jogador (cenário 7) ---
+
+
+class YieldingSender(FakeSender):
+    """Cede o controle ao loop em cada envio, como um socket de verdade."""
+
+    async def __call__(self, peer_id, msg):
+        await asyncio.sleep(0)
+        return await super().__call__(peer_id, msg)
+
+
+def fast_host(sender, timeout):
+    return GameHost(Config(name="alice", namespace="CIC", turn_timeout=timeout), sender)
+
+
+async def test_turn_timeout_skips_turn_without_costing_life(caplog):
+    caplog.set_level(logging.INFO)
+    s = YieldingSender()
+    h = fast_host(s, 1)  # turn_timeout é inteiro no protocolo (GAME_START valida o tipo)
+    await running(h, s, "banana", "bob@CIC", "carol@CIC", "dave@CIC")
+    await asyncio.sleep(1.3)  # um timeout (1 s); o segundo só em ~2 s
+    states = s.of_type("STATE")
+    assert {m["dst"] for m in states} == {"bob@CIC", "carol@CIC", "dave@CIC"}  # difusão completa
+    st = states[0]
+    assert st["seq"] == 2 and st["turn"] == "carol@CIC" and st["lives"] == 6
+    assert st["last_guess"] == {"player": "bob@CIC", "timeout": True}
+    assert "Turn timeout for bob@CIC — skipping" in caplog.text
+    await h.shutdown()
+
+
+async def test_turn_timer_restarts_on_every_state():
+    s = YieldingSender()
+    h = fast_host(s, 1)
+    await running(h, s, "banana", "bob@CIC", "carol@CIC")
+    await asyncio.sleep(0.6)
+    await guess(h, "bob@CIC", letter="a")  # novo STATE: o relógio recomeça
+    await asyncio.sleep(0.6)  # 1,2 s desde o início, 0,6 s desde a jogada: ainda sem timeout
+    assert h._seq == 2 and h._turn == "carol@CIC"
+    await asyncio.sleep(0.7)  # passou de 1 s desde a jogada
+    assert h._seq == 3 and h._last_guess == {"player": "carol@CIC", "timeout": True}
+    await h.shutdown()
+
+
+async def test_turn_timer_is_cancelled_when_game_ends_or_shuts_down():
+    s = YieldingSender()
+    h = fast_host(s, 1)
+    await running(h, s, "casa", "bob@CIC")
+    assert h._turn_task is not None
+    await guess(h, "bob@CIC", word="casa")  # vitória
+    assert h._turn_task is None
+    await running(h, s, "gato", "bob@CIC")
+    await h.cancel()
+    assert h._turn_task is None
+    await running(h, s, "pato", "bob@CIC")
+    await h.shutdown()
+    await asyncio.sleep(0)  # deixa o loop concluir os cancelamentos
+    assert h._turn_task is None and not [t for t in asyncio.all_tasks() if "GameHost._turn_timer" in repr(t)]
+
+
+async def test_stale_on_players_own_turn_passes_the_turn(host, sender):
+    await running(host, sender, "banana", "bob@CIC", "carol@CIC")
+    await host.on_peer_stale("bob@CIC")  # kill -9 na vez do bob
+    st = sender.of_type("STATE")[-1]
+    assert st["turn"] == "carol@CIC" and st["players"] == ["carol@CIC"]
+    await guess(host, "carol@CIC", letter="a")  # a partida continua
+    assert host.status == GameStatus.RUNNING
+
+
+# --- GameHost.status_lines() (a CLI delega o /status ao host) ---
+
+
+async def test_host_status_lines(host, sender):
+    assert host.status_lines() == []  # sem partida: quem chama mostra o do jogador
+    await host.create("banana")
+    assert "status: OPEN" in host.status_lines()[0]
+    await join(host, "bob@CIC")
+    await join(host, "carol@CIC")
+    await host.start()
+    await guess(host, "bob@CIC", letter="a")
+    text = "\n".join(host.status_lines())
+    for piece in (host.game_id, f"host: {HOST}", "status: RUNNING", "_ a _ a _ a", "banana",
+                  "Vidas: 6 / 6", "Erradas: -", "bob@CIC, carol@CIC", "Vez de: carol@CIC", "s restantes"):
+        assert piece in text, piece
+    await guess(host, "carol@CIC", letter="z")
+    assert "Erradas: z" in "\n".join(host.status_lines())
+    await guess(host, "bob@CIC", word="banana")
+    assert "status: FINISHED" in host.status_lines()[0]
+
+
+async def test_timer_ignores_stale_seq_and_finished_game(sender):
+    h = GameHost(Config(name="alice", namespace="CIC", turn_timeout=0), sender)
+    await running(h, sender, "banana", "bob@CIC", "carol@CIC")
+    h._cancel_turn_timer()  # só o timer chamado à mão abaixo
+    await h._turn_timer(h._seq - 1)  # timer velho: o STATE já mudou desde que ele nasceu
+    assert not sender.sent and h._last_guess is None
+    await h.cancel()
+    sender.clear()
+    await h._turn_timer(h._seq)  # partida já encerrada
+    assert not sender.of_type("STATE")
+    await h.shutdown()
+
+
+# --- revisão da 02.5: log depois do fim e timer que escapa do shutdown ---
+
+
+async def test_no_turn_log_after_last_player_leaves_during_timeout_broadcast(caplog):
+    caplog.set_level(logging.INFO)
+
+    class LeavingOnTimeout(YieldingSender):
+        host = None
+
+        async def __call__(self, peer_id, msg):
+            ok = await super().__call__(peer_id, msg)
+            if msg["type"] == "STATE" and (msg.get("last_guess") or {}).get("timeout"):
+                await leave(self.host, peer_id)  # o único jogador sai no meio da difusão
+            return ok
+
+    s = LeavingOnTimeout()
+    h = s.host = fast_host(s, 1)
+    await running(h, s, "banana", "bob@CIC")
+    caplog.clear()
+    await asyncio.sleep(1.3)
+    assert "Turn timeout for bob@CIC — skipping" in caplog.text
+    assert "finished: ABORTED (no_players)" in caplog.text
+    assert "Turn: None" not in caplog.text
+    await h.shutdown()
+
+
+async def test_shutdown_cancels_the_timer_that_is_still_broadcasting():
+    class BlockingSender(FakeSender):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.release = asyncio.Event(), asyncio.Event()
+
+        async def __call__(self, peer_id, msg):
+            if msg["type"] == "STATE" and msg["seq"] >= 2:  # o STATE do timeout
+                self.entered.set()
+                await self.release.wait()  # socket lento
+            return await super().__call__(peer_id, msg)
+
+    s = BlockingSender()
+    h = fast_host(s, 1)
+    await running(h, s, "banana", "bob@CIC", "carol@CIC")
+    try:
+        await asyncio.wait_for(s.entered.wait(), 3)  # o timer estourou e está difundindo
+        await h.shutdown()
+        await asyncio.sleep(0)
+        assert not [t for t in asyncio.all_tasks() if "GameHost._turn_timer" in repr(t)]
+    finally:
+        s.release.set()
