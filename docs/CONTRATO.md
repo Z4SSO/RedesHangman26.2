@@ -132,7 +132,7 @@ ka.unwatch(conn)
 await ka.stop()                 # cancela todas as tarefas de PING
 ```
 
-- RTT = recepção do `PONG` − envio do `PING` casado por `msg_id` (relógio monotônico); `conn.rtt_ms` é a média dos últimos 10. Log do RTT em **DEBUG** (`[KeepAlive] bob@CIC RTT=41.7 ms (avg 43.2 ms)`): com um PING por vizinho a cada 30 s, em INFO ele poluiria a tela durante a partida; aparece no `--log-file`.
+- RTT = recepção do `PONG` − envio do `PING` casado por `msg_id` (relógio monotônico); `conn.rtt_ms` é a média dos últimos 10. Log do RTT em **INFO** (`[KeepAlive] bob@CIC RTT=41.7 ms (avg 43.2 ms)`): é um dos exemplos da seção "Observabilidade e Logs" da especificação, que a avaliação usa, então tem de aparecer na tela com o nível padrão (é uma linha por vizinho a cada `ping_interval`).
 - Após `ping_miss_limit` (3) PINGs seguidos sem `PONG`: `WARNING [KeepAlive] X missed 3 PINGs — marking STALE`, `conn.state = STALE` e `conn.close("idle", wait_ack=False)`. O fechamento chega ao `on_closed` e daí à `PeerTable.detach`, que emite `peer_stale` uma única vez. Não espera o `BYE_OK` (o peer já não responde).
 - **Ligação (C/01.7):** `server.on_pong = ka.on_pong`; o `on_connected` do servidor chama `ka.watch(conn)` e depois `table.attach(conn)`. Não é preciso `unwatch` no `on_closed`: a tarefa termina sozinha quando a conexão fecha. `ka.stop()` entra no `P2PClient.stop()`.
 - `PeerConnection.close(reason, wait_ack=True)`: com `wait_ack=False` envia o `BYE` e fecha na hora.

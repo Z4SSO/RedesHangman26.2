@@ -49,7 +49,9 @@ class P2PClient:
         self.server.on_pong = self.keep_alive.on_pong
         self.server.on_bad_line = self.router.on_bad_line
 
-        self._registered = False
+        self._registered = False  # o servidor tem um registro válido nosso (até onde sabemos)
+        self._was_registered = False  # registramos com sucesso alguma vez (decide o UNREGISTER)
+        self._ttl = float(cfg.register_ttl)  # TTL efetivo (o servidor satura em 1–86400)
         self._tasks: list[asyncio.Task] = []  # tarefas periódicas, canceladas no stop()
         self._stop_task: asyncio.Task | None = None
         self._last_manual = float("-inf")
@@ -107,12 +109,15 @@ class P2PClient:
     async def _register(self) -> bool:
         """REGISTER (serve também de refresh). Nunca levanta."""
         try:
-            await self.rdv.register()
+            resp = await self.rdv.register()
         except RendezvousError as exc:
             self._registered = False
             log.warning("REGISTER failed: %s", exc.message)
             return False
-        self._registered = True
+        self._registered = self._was_registered = True
+        ttl = resp.get("ttl")
+        if isinstance(ttl, (int, float)) and ttl > 0:
+            self._ttl = float(ttl)  # o servidor pode ter saturado o valor pedido
         return True
 
     async def _discover_once(self) -> bool:
@@ -154,7 +159,7 @@ class P2PClient:
     async def _refresh_loop(self) -> None:
         """Renova o registro na metade do TTL (especificação: antes de expirar)."""
         while True:
-            await asyncio.sleep(self.cfg.register_ttl / 2)
+            await asyncio.sleep(self._ttl / 2)
             try:
                 await self._register()
             except asyncio.CancelledError:
@@ -166,6 +171,8 @@ class P2PClient:
         """`/reconnect`: DISCOVER + reconciliação imediatos e tentativa já dos
         peers STALE. No máximo uma vez a cada 5 s, para o usuário não conseguir
         estourar o limite do Rendezvous repetindo o comando."""
+        if self._stop_task is not None:
+            return False  # encerrando: nada de DISCOVER novo
         now = asyncio.get_running_loop().time()
         if now - self._last_manual < MANUAL_RECONNECT_MIN_INTERVAL:
             log.info("reconnect ignored: wait %.0f s between requests",
@@ -204,9 +211,11 @@ class P2PClient:
         await self._step("player.leave", self.player.leave())
         # 3. BYE a todos os vizinhos (espera BYE_OK até 2 s, em paralelo)
         await self._step("table.close_all", self.table.close_all("shutdown"))
-        # 4. UNREGISTER no Rendezvous (só se estamos registrados: com o servidor
-        #    fora do ar ou travado não há o que remover, e o Ctrl+C não espera)
-        if self._registered:
+        # 4. UNREGISTER no Rendezvous. Só se chegamos a registrar alguma vez: com o
+        #    servidor fora do ar ou travado desde o início não há o que remover, e
+        #    o Ctrl+C não espera 5 s. Um erro transitório depois de registrar
+        #    (peer_not_registered) não pode deixar o peer listado até o TTL.
+        if self._was_registered:
             await self._step("rdv.unregister", self.rdv.unregister())
         # 5. tarefas de PING e servidor TCP
         await self._step("keep_alive.stop", self.keep_alive.stop())

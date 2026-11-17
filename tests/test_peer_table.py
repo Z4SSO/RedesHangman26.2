@@ -437,3 +437,21 @@ async def test_stale_peer_without_address_is_tried_when_discover_brings_it():
 
     await table.reconcile([item("bob", 8082)])  # o DISCOVER traz o endereço
     await until(lambda: table.state_of("bob@CIC") == PeerState.CONNECTED)
+
+
+async def test_absent_peers_are_closed_in_parallel():
+    """Cada fechamento espera o BYE_OK (até 2 s): vários ausentes não somam o tempo."""
+    class SlowConn(FakeConn):
+        async def close(self, reason="shutdown"):
+            await asyncio.sleep(0.3)
+            await super().close(reason)
+
+    conn = FakeConnector()
+    conn.by_port = {8082: "bob@CIC", 8083: "carol@CIC", 8084: "dave@CIC"}
+    table = PeerTable(CFG, conn)
+    for pid in ("bob@CIC", "carol@CIC", "dave@CIC"):
+        await table.attach(SlowConn(pid))
+    started = asyncio.get_running_loop().time()
+    await table.reconcile([])  # os três sumiram do Rendezvous
+    assert asyncio.get_running_loop().time() - started < 0.7  # ~0,3 s, não 0,9 s
+    assert all(table.state_of(p) == PeerState.GONE for p in ("bob@CIC", "carol@CIC", "dave@CIC"))

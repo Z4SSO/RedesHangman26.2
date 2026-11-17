@@ -87,7 +87,7 @@ async def test_watch_twice_creates_one_task():
 
 
 async def test_pong_sets_rtt_and_resets_missed(caplog):
-    caplog.set_level(logging.DEBUG, logger="KeepAlive")
+    caplog.set_level(logging.INFO, logger="KeepAlive")
     ka, conn = make_ka(), FakeConn()
     ka.watch(conn)
     await wait_for(lambda: len(conn.sent) == 1)
@@ -96,6 +96,7 @@ async def test_pong_sets_rtt_and_resets_missed(caplog):
     assert conn.rtt_ms is not None and conn.rtt_ms >= 0
     assert conn.missed_pings == 0
     assert re.search(r"bob@CIC RTT=\d+\.\d ms \(avg \d+\.\d ms\)", caplog.text)
+    assert all(r.levelno == logging.INFO for r in caplog.records if "RTT=" in r.getMessage())  # visível na tela
     await ka.stop()
 
 

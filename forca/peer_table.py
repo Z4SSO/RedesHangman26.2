@@ -169,9 +169,11 @@ class PeerTable:
                 # entrada): agora o DISCOVER trouxe, então tenta
                 self._spawn_connect(entry)
 
-        for peer_id, entry in list(self._entries.items()):
-            if peer_id not in seen and entry.state != PeerState.GONE:
-                await self._mark_gone(entry, "absent from DISCOVER")
+        absent = [e for pid, e in list(self._entries.items())
+                  if pid not in seen and e.state != PeerState.GONE]
+        # cada fechamento espera o BYE_OK por até 2 s: em paralelo, para vários
+        # peers ausentes não atrasarem a reconciliação em 2 s por peer
+        await asyncio.gather(*(self._mark_gone(e, "absent from DISCOVER") for e in absent))
 
     # --- avisos do PeerServer ----------------------------------------------
 

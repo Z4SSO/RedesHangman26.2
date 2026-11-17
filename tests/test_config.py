@@ -25,3 +25,18 @@ def test_valid_turn_timeout_passes(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"turn_timeout": 45}), encoding="utf-8")
     assert load_config(path).turn_timeout == 45
+
+
+@pytest.mark.parametrize("key,value", [("discover_interval", 0), ("discover_interval", -3),
+                                        ("discover_interval", "20"), ("register_ttl", 1),
+                                        ("register_ttl", 0), ("register_ttl", True)])
+def test_intervals_that_would_hammer_the_rendezvous_are_refused(tmp_path, key, value):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({key: value}))
+    with pytest.raises(ValueError, match=key):
+        load_config(path)
+
+
+def test_default_intervals_are_valid():
+    cfg = load_config(None)
+    assert cfg.discover_interval >= 1 and cfg.register_ttl >= 2

@@ -186,3 +186,42 @@ async def test_garbage_response_is_bad_response():
         await rdv.discover()
     server.close()
     assert exc.value.message == "bad_response"
+
+
+# --- correções da revisão contra a especificação -----------------------------
+
+
+async def test_discover_none_omits_namespace_to_list_every_namespace():
+    """`/peers *`: sem `namespace` no pedido, o servidor devolve todos os namespaces."""
+    async with FakeRendezvous(lambda r: {"status": "OK", "peers": []}) as srv:
+        rdv = srv.client()
+        await rdv.discover(None)  # todos
+        await rdv.discover()  # padrão: o local
+        await rdv.discover("OUTRO")
+    assert srv.requests() == [
+        {"type": "DISCOVER"},
+        {"type": "DISCOVER", "namespace": "CIC"},
+        {"type": "DISCOVER", "namespace": "OUTRO"},
+    ]
+
+
+async def test_oversized_request_becomes_rendezvous_error():
+    async with FakeRendezvous(ok_register) as srv:
+        rdv = srv.client(name="x" * 40000)
+        with pytest.raises(RendezvousError) as exc:
+            await rdv.register()
+    assert exc.value.message == "request_too_large" and srv.lines == []  # nem foi enviado
+
+
+async def test_register_response_without_ip_is_bad_response():
+    async with FakeRendezvous(lambda r: {"status": "OK", "ttl": 60}) as srv:
+        with pytest.raises(RendezvousError) as exc:
+            await srv.client().register()
+    assert exc.value.message == "bad_response"
+
+
+async def test_discover_response_without_peers_list_is_bad_response():
+    async with FakeRendezvous(lambda r: {"status": "OK", "peers": "nao-e-lista"}) as srv:
+        with pytest.raises(RendezvousError) as exc:
+            await srv.client().discover()
+    assert exc.value.message == "bad_response"

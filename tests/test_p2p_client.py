@@ -374,3 +374,55 @@ async def test_different_public_ip_does_not_try_loopback():
         await c._connect("203.0.113.7", 8082)  # mesmo IP público: loopback primeiro, depois o IP
         assert calls == [("127.0.0.1", 8082), ("203.0.113.7", 8082)]
         await c.stop()
+
+
+# --- correções da revisão contra a especificação -----------------------------
+
+
+async def test_register_is_refreshed_every_half_of_the_ttl():
+    async with FakeRdv() as rdv:
+        (c,) = await start_all(rdv, "alice", register_ttl=2, discover_interval=30)  # refresh a cada 1 s
+        await until(lambda: rdv.requests.count("REGISTER") >= 3, timeout=5)  # 1 inicial + 2 refreshes
+        await c.stop()
+
+
+async def test_refresh_uses_the_ttl_the_server_applied():
+    """O servidor satura o TTL pedido; o refresh deve seguir o valor efetivo."""
+    async with FakeRdv() as rdv:
+        (c,) = await start_all(rdv, "alice", register_ttl=86400 * 3)
+        rdv.registered[("CIC", "alice")]["ttl"]  # registrado
+        assert c._ttl == 86400 * 3  # o fake não satura; o P2PClient guarda o que o servidor devolveu
+        await c.stop()
+
+
+async def test_failed_discover_does_not_touch_the_peer_table():
+    """DISCOVER com erro não reconcilia: um vizinho conectado não pode virar GONE."""
+    async with FakeRdv() as rdv:
+        a, b = await start_all(rdv, "alice", "bob")
+        await until(lambda: len(a.table.connected()) == 1)
+        rdv.fail_all = True
+        await asyncio.sleep(0.6)  # vários ciclos de DISCOVER falhando
+        assert len(a.table.connected()) == 1
+        assert a.table.state_of("bob@CIC").value == "CONNECTED"
+        await stop_all(a, b)
+
+
+async def test_unregister_is_sent_even_after_a_transient_not_registered_state():
+    async with FakeRdv() as rdv:
+        (c,) = await start_all(rdv, "alice")
+        await until(lambda: "DISCOVER" in rdv.requests)
+        c._registered = False  # simula o estado depois de um peer_not_registered
+        await c.stop()
+        assert rdv.requests.count("UNREGISTER") == 1
+
+
+async def test_reconcile_now_does_nothing_while_stopping():
+    async with FakeRdv() as rdv:
+        (c,) = await start_all(rdv, "alice", discover_interval=30)
+        await until(lambda: "DISCOVER" in rdv.requests)
+        stopping = asyncio.create_task(c.stop())
+        await asyncio.sleep(0)
+        before = rdv.requests.count("DISCOVER")
+        assert await c.reconcile_now() is False
+        await stopping
+        assert rdv.requests.count("DISCOVER") == before

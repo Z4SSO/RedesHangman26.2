@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from . import protocol
 from .config import Config
@@ -27,6 +28,7 @@ from .config import Config
 log = logging.getLogger("RDV")
 
 DEFAULT_TIMEOUT = 5.0  # segundos para conectar e, depois, para ler a resposta
+LOCAL: Any = object()  # "o namespace local" (diferente de None, que significa "todos")
 
 
 class RendezvousError(Exception):
@@ -86,16 +88,20 @@ class RendezvousConnection:
             )
         return resp
 
-    async def discover(self, namespace: str | None = None) -> list[dict]:
-        """DISCOVER no namespace dado (padrão: o local).
+    async def discover(self, namespace: str | None = LOCAL) -> list[dict]:
+        """DISCOVER no namespace dado. Padrão: o namespace local. `None` OMITE o
+        campo `namespace` do pedido, e o servidor devolve os peers de TODOS os
+        namespaces (especificação, DISCOVER; é o que o `/peers *` usa).
 
         A resposta do servidor inclui o próprio peer; ele é removido aqui
         (filtro por name + namespace). Cada item: ip, port, name, namespace,
         ttl, expires_in.
         """
-        resp = await self._command(
-            {"type": "DISCOVER", "namespace": namespace or self.cfg.namespace}
-        )
+        ns = self.cfg.namespace if namespace is LOCAL else namespace
+        request: dict = {"type": "DISCOVER"}
+        if ns is not None:
+            request["namespace"] = ns
+        resp = await self._command(request)
         peers = resp.get("peers")
         if not isinstance(peers, list):
             raise RendezvousError("bad_response")
@@ -144,7 +150,11 @@ class RendezvousConnection:
             raise RendezvousError("connection_failed") from exc
 
         try:
-            line = protocol.encode(request)
+            try:
+                line = protocol.encode(request)
+            except protocol.ProtocolError:
+                # name/namespace gigantes: nem chega ao servidor (a especificação limita a 64)
+                raise RendezvousError("request_too_large") from None
             log.debug("-> %s", line.decode("utf-8").rstrip())
             writer.write(line)
             await writer.drain()

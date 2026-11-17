@@ -20,7 +20,7 @@ Jogar uma partida completa como jogador contra o `forca-bot` e como host com o c
 
 ## Dentro do escopo
 
-- [ ] Entrar numa partida do `forca-bot` (namespace `FORCA`) e jogar até o `GAME_OVER`
+- [ ] Entrar numa partida do bot oficial (`bot@CIC`, namespace `CIC`, `45.171.101.167:8081`; **não** é `FORCA`) e jogar até o `GAME_OVER`: `python tools/bot_check.py all`
 - [ ] Criar partida e ter o cliente de referência como jogador
 - [ ] Se alguma mensagem for recusada, comparar o JSON com a especificação (campo faltando, tipo errado, `msg_id`)
 - [ ] Registrar o resultado em `docs/testes.md`; se o material não existir, escrever isso e o que foi feito no lugar
