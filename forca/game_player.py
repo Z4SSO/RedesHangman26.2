@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Máquina de estados do jogador: JOIN, STATE com seq, GUESS, hash, host caiu.
 
 Dono: Pessoa B. Issue 02.6. Logger: "Player" (linhas da especificação) e "Game"

@@ -1,0 +1,8 @@
+{
+  "grupo": 0,
+  "integrantes": [
+    {"nome": "Nome Completo do Integrante A (rede)", "matricula": "000000000"},
+    {"nome": "Nome Completo do Integrante B (jogo)", "matricula": "000000000"},
+    {"nome": "Nome Completo do Integrante C (CLI e integração)", "matricula": "000000000"}
+  ]
+}

@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Cliente do servidor Rendezvous: REGISTER / DISCOVER / UNREGISTER.
 
 Dono: Pessoa A. Issue 01.1. Logger: "RDV".

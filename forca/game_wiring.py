@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Liga o jogo (parte B) à rede: roteador, eventos da PeerTable e a exclusão mútua.
 
 Dono: Pessoa C. Issue 01.7 (parte de ligação). Quem chama é o P2PClient (parte A),

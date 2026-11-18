@@ -1,0 +1,307 @@
+{
+ "rdv_register": {
+  "type": "REGISTER",
+  "namespace": "CIC",
+  "name": "alice",
+  "port": 29010,
+  "ttl": 7200
+ },
+ "rdv_register_ok": {
+  "status": "OK",
+  "ttl": 7200,
+  "ip": "127.0.0.1",
+  "port": 29010
+ },
+ "rdv_discover": {
+  "type": "DISCOVER",
+  "namespace": "CIC"
+ },
+ "rdv_discover_ok": {
+  "status": "OK",
+  "peers": [
+   {
+    "ip": "127.0.0.1",
+    "port": 29011,
+    "name": "bob",
+    "namespace": "CIC",
+    "ttl": 7200,
+    "expires_in": 7200
+   },
+   {
+    "ip": "127.0.0.1",
+    "port": 29012,
+    "name": "carol",
+    "namespace": "CIC",
+    "ttl": 7200,
+    "expires_in": 7200
+   }
+  ]
+ },
+ "rdv_unregister": {
+  "type": "UNREGISTER",
+  "namespace": "CIC",
+  "name": "bob",
+  "port": 29131
+ },
+ "hello": {
+  "type": "HELLO",
+  "msg_id": "8916becd…",
+  "peer_id": "testeA@CIC",
+  "version": "1.0",
+  "features": [
+   "hangman"
+  ],
+  "ttl": 1
+ },
+ "hello_ok": {
+  "type": "HELLO_OK",
+  "msg_id": "8916becd…",
+  "ttl": 1,
+  "peer_id": "bot@CIC",
+  "version": "1.0",
+  "features": [
+   "hangman"
+  ]
+ },
+ "ping": {
+  "type": "PING",
+  "msg_id": "e68e9558…",
+  "timestamp": "2026-11-17T17:58:44.679Z",
+  "ttl": 1
+ },
+ "pong": {
+  "type": "PONG",
+  "msg_id": "e68e9558…",
+  "ttl": 1,
+  "timestamp": "2026-11-17T17:58:44.679Z"
+ },
+ "bye": {
+  "type": "BYE",
+  "msg_id": "0abe6fb2…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "reason": "idle"
+ },
+ "bye_ok": {
+  "type": "BYE_OK",
+  "msg_id": "7819de9a…",
+  "src": "testeB@CIC",
+  "dst": "testeA@CIC",
+  "ttl": 1
+ },
+ "game_list": {
+  "type": "GAME_LIST",
+  "msg_id": "be673aaf…",
+  "src": "testeA@CIC",
+  "dst": "bot@CIC",
+  "ttl": 1
+ },
+ "game_list_ok": {
+  "type": "GAME_LIST_OK",
+  "msg_id": "be673aaf…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "games": [
+   {
+    "game_id": "bot@CIC/551f9345",
+    "host": "bot@CIC",
+    "status": "OPEN",
+    "players": [],
+    "max_players": 4,
+    "lives": 6,
+    "word_length": 7
+   }
+  ]
+ },
+ "join": {
+  "type": "JOIN",
+  "msg_id": "470b56f3…",
+  "src": "testeA@CIC",
+  "dst": "bot@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "ttl": 1
+ },
+ "join_ok": {
+  "type": "JOIN_OK",
+  "msg_id": "470b56f3…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "players": [
+   "testeA@CIC"
+  ],
+  "rejoin": false
+ },
+ "join_err": {
+  "type": "JOIN_ERR",
+  "msg_id": "7bed834f…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "game_id": "bot@CIC/6678f990",
+  "reason": "game_running"
+ },
+ "join_ok_rejoin": {
+  "type": "JOIN_OK",
+  "msg_id": "ed902f9a…",
+  "src": "alice@CIC",
+  "dst": "carol@CIC",
+  "game_id": "alice@CIC/9fc8f963",
+  "players": [
+   "bob@CIC",
+   "carol@CIC"
+  ],
+  "rejoin": true,
+  "ttl": 1
+ },
+ "leave": {
+  "type": "LEAVE",
+  "msg_id": "06499f7d…",
+  "src": "bob@CIC",
+  "dst": "alice@CIC",
+  "game_id": "alice@CIC/3b8f43b8",
+  "ttl": 1
+ },
+ "game_start": {
+  "type": "GAME_START",
+  "msg_id": "5761cab9…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "players": [
+   "testeA@CIC",
+   "testeB@CIC"
+  ],
+  "lives": 6,
+  "word_length": 7,
+  "word_hash": "7d7f00e263834d33…",
+  "turn_timeout": 30
+ },
+ "state": {
+  "type": "STATE",
+  "msg_id": "649cbd4a…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeB@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "seq": 3,
+  "masked": "____ad_",
+  "wrong_letters": [],
+  "lives": 6,
+  "turn": "testeA@CIC",
+  "players": [
+   "testeA@CIC",
+   "testeB@CIC"
+  ],
+  "last_guess": {
+   "player": "testeB@CIC",
+   "correct": true,
+   "letter": "d"
+  }
+ },
+ "state_timeout": {
+  "type": "STATE",
+  "msg_id": "a536df15…",
+  "src": "alice@CIC",
+  "dst": "carol@CIC",
+  "game_id": "alice@CIC/299b85ee",
+  "seq": 2,
+  "masked": "______",
+  "wrong_letters": [],
+  "lives": 6,
+  "turn": "carol@CIC",
+  "players": [
+   "bob@CIC",
+   "carol@CIC"
+  ],
+  "last_guess": {
+   "player": "bob@CIC",
+   "timeout": true
+  },
+  "ttl": 1
+ },
+ "guess": {
+  "type": "GUESS",
+  "msg_id": "fd98dc8f…",
+  "src": "testeA@CIC",
+  "dst": "bot@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "letter": "a",
+  "ttl": 1
+ },
+ "guess_result": {
+  "type": "GUESS_RESULT",
+  "msg_id": "fd98dc8f…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "accepted": true,
+  "correct": true
+ },
+ "guess_not_your_turn": {
+  "type": "GUESS_RESULT",
+  "msg_id": "7ca37780…",
+  "src": "alice@CIC",
+  "dst": "carol@CIC",
+  "game_id": "alice@CIC/08353bfc",
+  "accepted": false,
+  "reason": "not_your_turn",
+  "ttl": 1
+ },
+ "guess_used": {
+  "type": "GUESS_RESULT",
+  "msg_id": "7d780c4c…",
+  "src": "alice@CIC",
+  "dst": "carol@CIC",
+  "game_id": "alice@CIC/69a68bbb",
+  "accepted": false,
+  "reason": "letter_already_used",
+  "ttl": 1
+ },
+ "game_over": {
+  "type": "GAME_OVER",
+  "msg_id": "7de45916…",
+  "ttl": 1,
+  "src": "bot@CIC",
+  "dst": "testeA@CIC",
+  "game_id": "bot@CIC/551f9345",
+  "result": "WON",
+  "word": "teclado",
+  "winner": "testeB@CIC",
+  "scores": {
+   "testeA@CIC": 2,
+   "testeB@CIC": 5
+  }
+ },
+ "game_over_aborted": {
+  "type": "GAME_OVER",
+  "msg_id": "4b4284db…",
+  "src": "alice@CIC",
+  "dst": "bob@CIC",
+  "game_id": "alice@CIC/53134bd8",
+  "result": "ABORTED",
+  "word": "banana",
+  "winner": null,
+  "scores": {
+   "bob@S11": 0,
+   "carol@S11": 0
+  },
+  "reason": "host_shutdown",
+  "ttl": 1
+ },
+ "error": {
+  "type": "ERROR",
+  "msg_id": "a8f62967…",
+  "src": "alice@CIC",
+  "dst": "bob@CIC",
+  "code": "invalid_state",
+  "message": "GUESS received but no game running",
+  "ref_msg_id": "79ceca4b…",
+  "ttl": 1
+ }
+}

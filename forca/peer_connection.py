@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Servidor e cliente TCP entre peers, framing JSON-por-linha, HELLO, duplicadas.
 
 Dono: Pessoa A. Issues 01.3 (transporte) e 01.4 (HELLO, BYE, duplicadas).

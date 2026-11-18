@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Mensagens peer–peer: envelope, codificação e validação.
 
 Este módulo é a ÚNICA fonte de verdade do formato das mensagens. Todos os
