@@ -1,0 +1,356 @@
+% Template do relatório. NÃO compile este arquivo direto: rode `python tools/build_entrega.py`,
+% que troca os marcadores {{...}} (dados do grupo, números medidos, exemplos reais) e gera dist/.
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[brazil]{babel}
+\usepackage[a4paper,margin=2cm]{geometry}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{fancyvrb}
+\usepackage[hidelinks]{hyperref}
+
+\AtBeginDocument{\shorthandoff{"}}  % aspas retas literais em "1.0", "hangman" etc.
+\DefineVerbatimEnvironment{codigo}{Verbatim}{fontsize=\footnotesize,frame=single,framesep=2mm}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+\setlength{\emergencystretch}{3em}  % \texttt longo não estoura a margem
+\setcounter{section}{-1}
+
+\title{PyP2P-Forca\\[4pt]\large Jogo da Forca Peer-to-Peer\\Relatório do Trabalho de Programação}
+\author{CIC0124 Redes de Computadores, Turma 02, 2026/2\\Universidade de Brasília}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\section{Identificação do grupo}
+\textbf{Grupo número: {{GRUPO}}}
+
+\begin{tabularx}{\textwidth}{@{}P{4.2cm}P{2cm}Y@{}}
+\toprule
+\textbf{Integrante} & \textbf{Matrícula} & \textbf{Parte do trabalho}\\
+\midrule
+{{NOME_A}} & {{MAT_A}} & \textbf{A: Rede}: \texttt{rendezvous\_connection}, \texttt{peer\_connection}, \texttt{peer\_table}, \texttt{keep\_alive}, \texttt{p2p\_client}\\
+{{NOME_B}} & {{MAT_B}} & \textbf{B: Jogo, CLI e integração}: \texttt{hangman}, \texttt{game\_host}, \texttt{game\_player}, \texttt{message\_router}, \texttt{cli}, \texttt{main}, \texttt{game\_wiring}, logs, \texttt{tools/run\_local.py}\\
+\bottomrule
+\end{tabularx}
+
+{\small Os módulos compartilhados (\texttt{protocol}, \texttt{models}, \texttt{config}) e o contrato entre módulos (\texttt{docs/CONTRATO.md}) foram definidos e mantidos pelos dois integrantes. Data de geração deste relatório: {{DATA}}.}
+
+\section{Visão geral}
+O PyP2P-Forca é um cliente peer-to-peer do Jogo da Forca, escrito em Python. Cada instância (peer) se registra em um servidor Rendezvous central, descobre os outros peers do mesmo \emph{namespace}, abre conexões TCP persistentes com todos eles e joga forca em turnos por essas mesmas conexões. Em cada partida, um peer faz o papel de host: conhece a palavra, valida as jogadas e difunde o estado. Os demais são jogadores. O host não joga, e o modo é cooperativo, com vidas compartilhadas.
+
+O protocolo segue a especificação do professor. O projeto implementa todas as mensagens, as regras do jogo, as máquinas de estado do host e do jogador, a tolerância a falhas (queda de jogador, reconexão, queda do host) e o encerramento ordenado, além de dois bônus da especificação: o chat na partida e a migração de host, que fica desligada por padrão (seção~\ref{sec:bonus}).
+
+\section{Como executar}
+
+\subsection{Requisitos mínimos para rodar em Linux}
+\begin{itemize}
+\item \textbf{Sistema:} Linux (desenvolvido e testado em Ubuntu 24.04 LTS). Não exige privilégios de administrador.
+\item \textbf{Python 3.11 ou superior} (testado com 3.12.3). O projeto adota o Python 3.11 como versão mínima.
+\item \textbf{Rede:} acesso TCP de saída ao servidor Rendezvous (\texttt{pyp2p.mfcaetano.cc}, porta 8080). Para receber conexões de outros peers, a porta de escuta (padrão 8081) precisa estar acessível a eles.
+\item Um terminal. No Ubuntu, se o módulo \texttt{venv} faltar: \texttt{sudo apt install python3-venv}.
+\end{itemize}
+
+\subsection{Compilação}
+Não há. O programa é escrito em Python (interpretado); basta executá-lo.
+
+\subsection{Bibliotecas e como instalá-las}
+\begin{itemize}
+\item \textbf{Para executar o programa:} nenhuma biblioteca externa. Usa só a biblioteca padrão do Python (\texttt{asyncio}, \texttt{json}, \texttt{hashlib}, \texttt{logging}, \texttt{argparse} etc.).
+\item \textbf{Apenas para rodar os testes:} \texttt{pytest} e \texttt{pytest-asyncio}, listadas em \texttt{requirements-dev.txt}.
+\end{itemize}
+\begin{codigo}
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt     # só necessário para os testes
+\end{codigo}
+
+\subsection{Passos para executar}
+\textbf{Um peer} (a partir da pasta do projeto; o Rendezvous público é o padrão):
+\begin{codigo}
+python -m forca.main --name alice --namespace CIC --port 8081
+\end{codigo}
+Opções: \texttt{-{}-name}, \texttt{-{}-namespace}, \texttt{-{}-port} (porta de escuta), \texttt{-{}-rdv-host} e \texttt{-{}-rdv-port} (outro Rendezvous), \texttt{-{}-log-file} (grava todos os logs, inclusive o JSON bruto em DEBUG), \texttt{-{}-log-level} (nível mostrado na tela), \texttt{-{}-config} (arquivo JSON, padrão \texttt{config.json}) e \texttt{-{}-host-migration} (liga o bônus de migração de host, seção~\ref{sec:migracao}). A precedência é: linha de comando $>$ \texttt{config.json} $>$ padrão. Chaves desconhecidas ou valores inválidos no JSON geram uma mensagem de erro clara.
+
+\textbf{Três peers na mesma máquina} (três terminais, ou um comando só com \texttt{tools/run\_local.py}, que sobe todos e permite mandar comandos a cada um e matar um deles):
+\begin{codigo}
+python -m forca.main --name alice --port 8081 --namespace CIC-grupo
+python -m forca.main --name bob   --port 8082 --namespace CIC-grupo
+python -m forca.main --name carol --port 8083 --namespace CIC-grupo
+# ou:
+python tools/run_local.py --names alice,bob,carol --namespace CIC-grupo
+\end{codigo}
+{\small Num servidor compartilhado, use um \emph{namespace} próprio para não misturar com peers de outros grupos. Como o Rendezvous divulga o IP público de cada peer, o cliente conecta por \texttt{127.0.0.1} nos vizinhos que têm o mesmo IP público que ele (veja a seção~\ref{sec:decisoes}).}
+
+\textbf{Comandos da interface} (digitados em cada peer):
+
+\begin{tabularx}{\textwidth}{@{}P{5.6cm}Y@{}}
+\toprule
+\textbf{Comando} & \textbf{Função}\\
+\midrule
+\texttt{/peers [* | \#namespace]} & descobre e lista peers (padrão: namespace local; \texttt{*} = todos)\\
+\texttt{/conn}, \texttt{/rtt} & conexões ativas (entrada/saída, estado, RTT) e RTT médio por peer\\
+\texttt{/reconnect} & força a reconciliação imediata com o Rendezvous\\
+\texttt{/games} & pergunta a todos os vizinhos e lista as partidas abertas\\
+\texttt{/create <palavra> [max]}, \texttt{/create -{}-random [max]} & cria partida e vira host (palavra informada ou sorteada de \texttt{words.txt})\\
+\texttt{/start}, \texttt{/cancel} & inicia (exige pelo menos 1 jogador) ou cancela a partida hospedada\\
+\texttt{/join <host>}, \texttt{/leave} & entra em / sai de uma partida\\
+\texttt{/guess <letra>}, \texttt{/word <palavra>} & palpite de letra ou de palavra inteira\\
+\texttt{/status} & estado local da partida (forca, vidas, letras erradas, vez de quem)\\
+\texttt{/chat <texto>} & bônus: mensagem a todos da partida\\
+\texttt{/log <nível>}, \texttt{/help}, \texttt{/quit} & nível de log da tela; ajuda; encerra (\texttt{LEAVE}/\texttt{GAME\_OVER} conforme o papel, \texttt{BYE} a todos, \texttt{UNREGISTER})\\
+\bottomrule
+\end{tabularx}
+
+\textbf{Exemplo de uma partida} (alice hospeda; bob e carol jogam):
+\begin{codigo}
+alice> /create banana
+bob>   /join alice@CIC        carol> /join alice@CIC
+alice> /start
+bob>   /guess n               # a vez passa a carol, e assim por diante
+bob>   /status
+\end{codigo}
+\textbf{Testes e cenários} ({{N_TESTES}} testes automatizados):
+\begin{codigo}
+python -m pytest -q                 # testes unitários e de rede (127.0.0.1)
+python tools/scenarios.py           # cenários 1 a 10 da especificação, com processos reais
+python tools/bot_check.py all       # cenário 11: jogar contra o bot oficial (precisa de internet)
+\end{codigo}
+
+\section{Arquitetura da solução}
+
+\subsection{Duas camadas sobre as mesmas conexões TCP}
+\begin{codigo}
+                    +------------------------------+
+                    |  Servidor Rendezvous         |
+                    |  pyp2p.mfcaetano.cc : 8080   |
+                    +---------------+--------------+
+        REGISTER / DISCOVER / UNREGISTER  (uma conexão curta por comando)
+        +---------------------------+---------------------------+
+        |                           |                           |
+  +-----v------+              +-----v------+              +-----v------+
+  | alice@CIC  |              |  bob@CIC   |              | carol@CIC  |
+  |   (HOST)   |              | (jogador)  |              | (jogador)  |
+  +-----+------+              +-----+------+              +-----+------+
+        |  malha de descoberta: HELLO, PING/PONG, GAME_LIST, BYE (todos com todos)
+        |  estrela da partida:  JOIN, GAME_START, STATE, GUESS, GAME_OVER (host <-> jogador)
+\end{codigo}
+\begin{itemize}
+\item \textbf{Malha de descoberta:} cada peer conecta em todos os peers descobertos, faz o \texttt{HELLO} e mantém a conexão com \texttt{PING/PONG}. É por ela que se descobrem as partidas abertas (\texttt{GAME\_LIST}).
+\item \textbf{Estrela da partida:} as mensagens de jogo trafegam só entre o host e cada jogador, pela conexão que já existe, sem abrir uma segunda. Os jogadores não trocam mensagens de jogo entre si, porque o host é a única fonte do estado.
+\end{itemize}
+
+\subsection{Módulos}
+\begin{tabularx}{\textwidth}{@{}P{5cm}Y@{}}
+\toprule
+\textbf{Módulo} & \textbf{Responsabilidade}\\
+\midrule
+\texttt{protocol.py} & Única fonte do formato das mensagens: construção (\texttt{new\_message}, \texttt{reply}, \texttt{make\_error}), codificação (uma linha JSON UTF-8, máx.\ 32 KiB) e validação do envelope e dos campos (\texttt{REQUIRED\_FIELDS} e \texttt{FIELD\_TYPES}).\\
+\texttt{models.py}, \texttt{config.py} & Tipos compartilhados (estados do peer, do host e do jogador; o tipo \texttt{Sender}) e configuração (\texttt{config.json} + linha de comando).\\
+\texttt{rendezvous\_connection.py} & Cliente do Rendezvous: uma conexão TCP nova por comando, com \emph{timeout}; filtra o próprio peer no \texttt{DISCOVER}.\\
+\texttt{peer\_connection.py} & \texttt{PeerServer} (escuta e conecta) e \texttt{PeerConnection} (uma por socket): leitura por linha, \texttt{HELLO}, \texttt{BYE}, \texttt{PING/PONG}, desempate de conexões duplicadas, log \texttt{Wire}.\\
+\texttt{peer\_table.py} & Tabela de peers: estados \texttt{DISCOVERED/CONNECTING/CONNECTED/STALE/GONE}, reconciliação com o Rendezvous, reconexão com \emph{backoff} exponencial e eventos \texttt{peer\_connected/peer\_stale/peer\_gone}. Implementa o \texttt{Sender} (\texttt{send\_to}).\\
+\texttt{keep\_alive.py} & \texttt{PING} periódico, RTT (média dos últimos 10) e detecção de queda (3 \texttt{PING}s sem \texttt{PONG}).\\
+\texttt{p2p\_client.py} & Orquestra tudo: sobe o servidor, registra, roda o \texttt{DISCOVER} periódico e o refresh do registro, e encerra na ordem correta.\\
+\texttt{message\_router.py}, \texttt{game\_wiring.py} & Valida cada mensagem recebida, responde \texttt{ERROR} quando cabe e despacha por tipo; liga o jogo ao roteador e aos eventos da tabela.\\
+\texttt{hangman.py} & Lógica pura do jogo (normalização, \texttt{word\_hash}, letras, vidas), sem nenhum import de rede.\\
+\texttt{game\_host.py}, \texttt{game\_player.py} & Máquinas de estado do host (lobby, partida, turnos, \emph{timeout}, falhas) e do jogador (aplica \texttt{STATE} por \texttt{seq}, confere o hash, \emph{rejoin}).\\
+\texttt{cli.py}, \texttt{main.py} & Comandos do usuário (leitura do teclado fora do \emph{event loop}), argumentos, logging e ciclo de vida.\\
+\bottomrule
+\end{tabularx}
+
+\subsection{Caminho de uma mensagem}
+\begin{codigo}
+socket --> PeerConnection --(HELLO, PING/PONG, BYE tratados aqui)--+
+                |  o resto                                       |
+                v                                                |
+          MessageRouter.on_message(conn, msg)                    |
+                |  validate_envelope --> ERROR ou descarta       |
+                v                                                |
+     GameHost.on_*  /  GamePlayer.on_*  --> send(peer_id, msg) --+
+                                            (= PeerTable.send_to)
+\end{codigo}
+O jogo (\texttt{game\_host}, \texttt{game\_player}) fala com a rede apenas por uma função \texttt{Sender} injetada e nunca importa a camada de conexão. Com um \texttt{Sender} falso, toda a lógica do jogo é testada sem abrir um socket, e a rede e o jogo puderam ser desenvolvidos em paralelo.
+
+\subsection{Concorrência}
+Todo o programa roda em \textbf{um único \emph{event loop} \texttt{asyncio}}: não há threads de rede nem estado compartilhado entre threads. Regras seguidas: nada bloqueia o \emph{loop} (a leitura do teclado vai para uma \emph{thread} própria; arquivos usam \texttt{asyncio.to\_thread}); a escrita em cada socket é protegida por um \texttt{asyncio.Lock} para que duas tarefas (host, \texttt{KeepAlive}, CLI) não misturem as linhas; toda tarefa em segundo plano é guardada e cancelada no encerramento; uma mensagem inválida nunca derruba o programa (vira \texttt{ERROR} ou é descartada); e nenhum laço que fala com o Rendezvous roda sem \texttt{asyncio.sleep}, porque o servidor bloqueia o IP por 1 minuto acima de 50 requisições por minuto (no uso normal são cerca de 3 por minuto por peer).
+
+\subsection{Ciclo de vida de um peer}
+\textbf{Início:} sobe o servidor TCP, registra-se no Rendezvous e dispara duas tarefas periódicas: \texttt{DISCOVER} a cada \texttt{discover\_interval} (20 s) $\rightarrow$ reconcilia a tabela e conecta nos novos; e refresh do registro a cada metade do TTL. Se o Rendezvous estiver fora do ar, o peer sobe mesmo assim e tenta registrar de novo a cada intervalo.
+
+\textbf{Encerramento} (\texttt{/quit} e \texttt{Ctrl+C} seguem o mesmo caminho): (0) cancela as tarefas periódicas; (1) se for host com partida ativa, envia \texttt{GAME\_OVER ABORTED} aos jogadores; (2) se for jogador em partida, envia \texttt{LEAVE} ao host; (3) envia \texttt{BYE} a todos os vizinhos e espera o \texttt{BYE\_OK} por até 2 s; (4) \texttt{UNREGISTER} no Rendezvous; (5) para os \texttt{PING}s e fecha o servidor TCP. Cada passo é protegido: um erro não impede os seguintes.
+
+\subsection{Máquinas de estado}
+\begin{codigo}
+Host (por partida):
+  IDLE --/create--> OPEN --/start (>= 1 jogador)--> RUNNING
+  em OPEN:    JOIN -> JOIN_OK | LEAVE -> LEAVE_OK | GAME_LIST -> GAME_LIST_OK | /cancel
+  em RUNNING: GUESS -> GUESS_RESULT + STATE | LEAVE -> STATE
+              timeout de turno -> STATE | jogador STALE -> STATE
+  OPEN ou RUNNING --GAME_OVER (WON | LOST | ABORTED)--> FINISHED
+  FINISHED --(anunciada por 60 s em GAME_LIST_OK)--> IDLE
+
+Jogador:
+  IDLE --/join--> JOINED --GAME_START + STATE seq=1--> PLAYING
+  JOINED --JOIN_ERR ou /leave--> IDLE
+  PLAYING --GAME_OVER, /leave ou host STALE--> IDLE
+
+Peer na tabela:
+  DISCOVERED -> CONNECTING -> CONNECTED -> STALE --(backoff, N tentativas)--> GONE
+  GONE volta a DISCOVERED quando reaparece em um DISCOVER
+\end{codigo}
+
+\section{Protocolos implementados, com exemplos de funcionamento}
+{\small Os exemplos abaixo são mensagens reais, capturadas dos logs \texttt{Wire} (JSON bruto) de execuções do programa: contra o bot oficial dos monitores (\texttt{bot@CIC}) e nos cenários automatizados. As respostas do Rendezvous (seção~\ref{sec:rdv}) vieram do Rendezvous local de teste (\texttt{tools/rdv\_local.py}), que reproduz o formato do servidor público. Para caber na página, os \texttt{msg\_id} (UUID v4) e o \texttt{word\_hash} foram abreviados com ``\dots'', as linhas longas foram quebradas e os \emph{namespaces} de teste foram trocados por \texttt{CIC}. A mensagem \texttt{ERROR} foi gerada pela própria função \texttt{protocol.make\_error}, pois o fluxo normal dos cenários não a provoca.}
+
+\subsection{Peer \texorpdfstring{$\leftrightarrow$}{<->} Rendezvous}\label{sec:rdv}
+Cada conexão TCP com o Rendezvous aceita exatamente um comando (uma linha JSON), e o servidor a fecha depois da resposta. Por isso o cliente abre uma conexão nova a cada operação, com \emph{timeout} de 5 s para conectar e para ler. O formato é o do servidor (\texttt{status} \texttt{OK}/\texttt{ERROR}), diferente do envelope peer-to-peer; nele, \texttt{ttl} é o tempo de vida do registro em segundos.
+
+\textbf{REGISTER} registra o peer e também renova o TTL (refresh na metade do TTL). A resposta traz o \texttt{ip} que o servidor observou, a única forma de o peer conhecer seu endereço público. O cliente guarda esse IP e o registra no log, com o aviso de que, atrás de NAT, ele é o IP do roteador.
+{{EX:rdv_register}}
+{{EX:rdv_register_ok}}
+\textbf{DISCOVER} lista os peers de um \emph{namespace} (ou de todos, se o campo for omitido, como no \texttt{/peers *}). A resposta inclui o próprio peer, que o cliente filtra pelo par \texttt{name} + \texttt{namespace} antes de conectar. Se o \texttt{DISCOVER} falhar, a tabela não é reconciliada, porque senão uma falha do servidor marcaria todos os peers como ausentes. Se o servidor responder \texttt{peer\_not\_registered} (o registro expirou), o cliente faz um novo \texttt{REGISTER} e repete o \texttt{DISCOVER} uma vez.
+{{EX:rdv_discover}}
+{{EX:rdv_discover_ok}}
+\textbf{UNREGISTER} é enviado no encerramento limpo:
+{{EX:rdv_unregister}}
+
+\subsection{Peer \texorpdfstring{$\leftrightarrow$}{<->} Peer: envelope e transporte}
+Toda mensagem é um objeto JSON em uma linha, UTF-8, terminada em \texttt{\textbackslash n}, com no máximo 32 KiB. Campos do envelope: \texttt{type}, \texttt{msg\_id} (UUID v4), \texttt{ttl} (sempre \texttt{1}; qualquer outro valor é descartado em silêncio), e \texttt{src}/\texttt{dst} (\texttt{peer\_id} = \texttt{nome@namespace}) em todas as mensagens, exceto \texttt{HELLO}, \texttt{HELLO\_OK}, \texttt{PING} e \texttt{PONG}, que são mensagens de conexão. \textbf{As respostas repetem o \texttt{msg\_id} da requisição} (\texttt{*\_OK}, \texttt{JOIN\_ERR}, \texttt{GUESS\_RESULT}, \texttt{PONG}, \texttt{BYE\_OK}); o \texttt{ERROR} tem \texttt{msg\_id} novo e aponta a causa em \texttt{ref\_msg\_id}.
+
+A validação (em \texttt{protocol.validate\_envelope}) confere, nesta ordem: tipo conhecido (\texttt{unknown\_type}), \texttt{msg\_id} e \texttt{ttl}, \texttt{src}/\texttt{dst}, destinatário (\texttt{not\_for\_me}), campos obrigatórios e o tipo de cada campo (\texttt{bad\_request}). Mensagem em contexto inválido (por exemplo, \texttt{GUESS} sem partida) gera \texttt{ERROR invalid\_state}. Linha que não é JSON gera \texttt{ERROR bad\_json} e fecha a conexão. Linha maior que 32 KiB fecha só aquela conexão. Ao receber, o cliente tolera a falta de campos opcionais; ao enviar, preenche todos os campos da especificação, com \texttt{null} quando não se aplicam. O roteador ainda descarta mensagens cujo \texttt{src} difere do peer dono do socket (anti-\emph{spoofing}).
+{{EX:error}}
+
+\subsection{Sessão: HELLO, desempate de duplicadas, PING/PONG e BYE}
+\textbf{HELLO / HELLO\_OK.} Quem abre a conexão envia \texttt{HELLO} com seu \texttt{peer\_id}, \texttt{version} \texttt{"1.0"} e \texttt{features} (obrigatório conter \texttt{"hangman"}); quem aceita responde \texttt{HELLO\_OK} com o mesmo \texttt{msg\_id}. Até o \texttt{HELLO\_OK}, qualquer outra mensagem é descartada. Um peer sem a feature \texttt{hangman} é aceito na malha, mas nunca recebe mensagens de lobby ou de partida.
+{{EX:hello}}
+{{EX:hello_ok}}
+\textbf{Conexões duplicadas.} Como todos tentam conectar em todos, é comum dois peers abrirem conexão um para o outro ao mesmo tempo. Fica a conexão aberta pelo peer de menor \texttt{peer\_id} (ordem lexicográfica), e a outra é fechada com \texttt{BYE} \texttt{reason:"duplicate"}. Cada lado calcula isso sozinho (se meu id é menor, vale a minha conexão de saída; senão, a de entrada) e os dois chegam à mesma escolha sem conversar. A vencedora é anunciada antes de a perdedora ser fechada, e a tabela troca de conexão sem emitir \texttt{peer\_stale}, para não derrubar uma partida por uma queda que não aconteceu. Assim o \texttt{/conn} mostra exatamente uma conexão por vizinho.
+
+\textbf{PING / PONG.} Os dois lados enviam \texttt{PING} a cada \texttt{ping\_interval} (30 s). O \texttt{PONG} repete o \texttt{msg\_id} e o \texttt{timestamp} do \texttt{PING}. O RTT é medido com relógio monotônico, casado por \texttt{msg\_id}, e o valor mostrado é a média móvel dos últimos 10. Após 3 \texttt{PING}s consecutivos sem \texttt{PONG}, o peer é marcado \texttt{STALE}, a conexão é fechada (com \texttt{BYE} \texttt{reason:"idle"}) e o evento \texttt{peer\_stale} dispara uma única vez. É esse evento que o jogo usa para detectar falhas.
+{{EX:ping}}
+{{EX:pong}}
+\textbf{BYE / BYE\_OK.} Encerramento controlado: quem envia \texttt{BYE} espera o \texttt{BYE\_OK} (do mesmo \texttt{msg\_id}) por até 2 s e fecha o socket com ou sem resposta; quem recebe responde \texttt{BYE\_OK} e fecha. O exemplo abaixo é o bot removendo um jogador inativo:
+{{EX:bye}}
+{{EX:bye_ok}}
+
+\subsection{Lobby}
+\texttt{/games} envia \texttt{GAME\_LIST} a todos os vizinhos com a feature \texttt{hangman} e consolida os \texttt{GAME\_LIST\_OK} (um peer sem partida responde \texttt{"games": []}).
+{{EX:game_list}}
+{{EX:game_list_ok}}
+\texttt{JOIN} é enviado ao host. O host responde \texttt{JOIN\_OK} (com a lista de jogadores na ordem de entrada) ou \texttt{JOIN\_ERR} com um dos motivos \texttt{unknown\_game}, \texttt{game\_full}, \texttt{game\_running}, \texttt{game\_finished} ou \texttt{already\_joined}. Um jogador que já estava na partida e voltou recebe \texttt{JOIN\_OK} com \texttt{rejoin: true}, seguido do \texttt{STATE} corrente, e vai para o fim do rodízio.
+{{EX:join}}
+{{EX:join_ok}}
+{{EX:join_err}}
+{{EX:join_ok_rejoin}}
+\texttt{LEAVE} (saída voluntária; o host remove o jogador e, se a partida está em andamento, difunde um novo \texttt{STATE}):
+{{EX:leave}}
+
+\subsection{Partida}
+\textbf{Regras fixadas pela especificação.} O host não joga e precisa de pelo menos 1 jogador. A palavra tem de 3 a 20 letras, só de \texttt{a} a \texttt{z}. O host a normaliza (minúsculas, sem acentos), e o \texttt{word\_hash} é o SHA-256 da palavra normalizada. O modo é cooperativo, com vidas compartilhadas (padrão 6). Os turnos seguem um \emph{round-robin} na ordem de entrada, e a vez passa ao próximo depois de qualquer jogada aceita, certa ou errada. Letra correta revela todas as ocorrências; incorreta custa 1 vida; letra repetida é rejeitada (\texttt{letter\_already\_used}). Palpite de palavra certo encerra com \texttt{WON}; errado custa 1 vida. Se o jogador da vez não joga em \texttt{turn\_timeout} (30 s), o host passa o turno sem custar vida. Fim: \texttt{WON} (palavra completa) ou \texttt{LOST} (vidas esgotadas). Cada letra revelada vale 1 ponto por ocorrência. \textbf{Jogada rejeitada não gera \texttt{STATE} nem consome o turno.}
+
+\textbf{GAME\_START} (host $\rightarrow$ cada jogador, ao \texttt{/start}) traz a ordem definitiva dos turnos, as vidas, o tamanho da palavra e o \texttt{word\_hash}, que permite ao jogador verificar depois que o host não trocou a palavra. Em seguida o host envia o primeiro \texttt{STATE} (\texttt{seq: 1}).
+{{EX:game_start}}
+\textbf{STATE} é o estado autoritativo, enviado a todos os jogadores após qualquer mudança (jogada aceita, \emph{timeout}, entrada ou saída de jogador). O \texttt{seq} começa em 1 e cresce de 1 em 1; o jogador descarta qualquer \texttt{STATE} com \texttt{seq} menor ou igual ao último aplicado. O primeiro exemplo é uma jogada; o segundo, um \emph{timeout} de turno (\texttt{last\_guess} com \texttt{timeout: true}, vidas inalteradas):
+{{EX:state}}
+{{EX:state_timeout}}
+\textbf{GUESS / GUESS\_RESULT.} O jogador envia exatamente um entre \texttt{letter} e \texttt{word}. O host responde só ao autor, repetindo o \texttt{msg\_id}: \texttt{accepted: true} com \texttt{correct}, ou \texttt{accepted: false} com \texttt{reason} (\texttt{not\_your\_turn}, \texttt{letter\_already\_used}, \texttt{invalid\_letter}, \texttt{invalid\_word}, \texttt{game\_not\_running}). O efeito sobre a partida chega a todos pelo \texttt{STATE} seguinte.
+{{EX:guess}}
+{{EX:guess_result}}
+{{EX:guess_not_your_turn}}
+{{EX:guess_used}}
+\textbf{GAME\_OVER} (host $\rightarrow$ todos) traz o resultado, a palavra, o vencedor (\texttt{null} em \texttt{LOST}/\texttt{ABORTED}) e o placar. Ao recebê-lo, o jogador calcula \texttt{sha256(word)} e compara com o \texttt{word\_hash} do \texttt{GAME\_START}; divergência é registrada como \emph{WARNING} (\texttt{host cheated: hash mismatch}). Nos testes, o log mostra \texttt{GAME\_OVER WON word=... winner=... \textemdash{} hash OK}.
+{{EX:game_over}}
+Quando o host se encerra, o resultado é \texttt{ABORTED} com \texttt{reason} (\texttt{host\_shutdown} ou \texttt{no\_players}):
+{{EX:game_over_aborted}}
+
+\subsection{Tratamento de falhas}
+\begin{tabularx}{\textwidth}{@{}P{3.2cm}P{4.4cm}Y@{}}
+\toprule
+\textbf{Evento} & \textbf{Detecção} & \textbf{Ação}\\
+\midrule
+Jogador cai & \texttt{PONG} ausente $\times$3 ou socket fechado & O host o remove da partida e difunde \texttt{STATE}; se era a vez dele, passa o turno; se não resta jogador, \texttt{ABORTED} (\texttt{no\_players}).\\
+Jogador volta & \texttt{JOIN} de \texttt{src} já conhecido em partida \texttt{RUNNING} & \texttt{JOIN\_OK rejoin:true} + \texttt{STATE} corrente; vai ao fim do rodízio.\\
+Host cai & \texttt{PONG} ausente $\times$3 ou socket fechado & Sem a migração (padrão), o jogador encerra a partida localmente, mostra \texttt{[Game] Host alice@CIC unreachable \textemdash{} game aborted} e volta a \texttt{IDLE}. Com \texttt{-{}-host-migration}, o jogador de menor \texttt{peer\_id} assume como host (seção~\ref{sec:migracao}).\\
+Host encerra (\texttt{/quit}) & \texttt{GAME\_OVER ABORTED} + \texttt{BYE} & Os jogadores voltam a \texttt{IDLE}.\\
+\texttt{STATE} fora de ordem & \texttt{seq} $\le$ último aplicado & Descartado (registrado em DEBUG).\\
+\texttt{GUESS} fora da vez & \texttt{src} $\ne$ \texttt{turn} & \texttt{GUESS\_RESULT not\_your\_turn}, sem \texttt{STATE}.\\
+Hash divergente & \texttt{sha256(word)} $\ne$ \texttt{word\_hash} & \emph{WARNING} \texttt{host cheated: hash mismatch}.\\
+\bottomrule
+\end{tabularx}
+
+\textbf{Reconexão com \emph{backoff}.} Um peer \texttt{STALE} é tentado de novo após $\mathtt{base\_backoff} \times 2^n$ segundos, limitado a \texttt{max\_backoff} (com os padrões: 2, 4, 8, 16, 32 s). Depois de \texttt{max\_reconnect\_attempts} (5) tentativas sem sucesso, vira \texttt{GONE} até reaparecer em um \texttt{DISCOVER}. A espera usa \texttt{asyncio.sleep} em tarefa própria, então um peer em espera não atrasa os outros; conectar de novo (por nós ou pelo próprio vizinho) zera a contagem. O comando \texttt{/reconnect} tenta já todos os peers \texttt{STALE}.
+
+\section{Decisões de projeto (onde a especificação deixa margem)}\label{sec:decisoes}
+As decisões foram registradas em \texttt{docs/CONTRATO.md} (seção 6) antes de codificar, para a rede e o jogo concordarem. As principais:
+\begin{itemize}
+\item \textbf{Desempate de duplicadas:} menor \texttt{peer\_id} (comparação de \emph{strings}), como na especificação.
+\item \textbf{\texttt{/cancel}} envia \texttt{GAME\_OVER ABORTED} com \texttt{reason:"host\_shutdown"} (a especificação lista só \texttt{host\_shutdown} e \texttt{no\_players}).
+\item \textbf{Todo \texttt{GAME\_OVER} passa por \texttt{FINISHED}:} a partida fica anunciada por 60 s em \texttt{GAME\_LIST\_OK} e depois volta a \texttt{IDLE}. Não há \texttt{STATE} final na vitória/derrota: o \texttt{GAME\_OVER} vem logo após o \texttt{GUESS\_RESULT}.
+\item \textbf{Um peer, uma partida:} quem cria ou entra em uma partida verifica que não está em outra; o jogo recebe um \texttt{busy()} para olhar o outro objeto sem importá-lo.
+\item \textbf{Palpite de palavra} é normalizado como a palavra secreta (\texttt{/word BANANA} = \texttt{banana}).
+\item \textbf{Linha que não é JSON antes do \texttt{HELLO}} só fecha a conexão, sem \texttt{ERROR} (o vizinho ainda não tem \texttt{peer\_id}, e o \texttt{ERROR} sairia sem \texttt{dst}). Depois do \texttt{HELLO}, responde \texttt{ERROR bad\_json} e fecha, como na especificação. É um desvio consciente do texto literal.
+\item \textbf{NAT e o mesmo IP público.} O Rendezvous divulga o IP público de cada peer, e muitos roteadores não deixam alcançar o próprio IP público por dentro (sem \emph{hairpin NAT}). Foi o que aconteceu com três peers na mesma máquina usando o servidor público: eles não conseguiam se conectar. Por isso, se o vizinho tem o mesmo IP público que o meu, o cliente tenta \texttt{127.0.0.1:porta} primeiro e só depois o IP divulgado (se o vizinho estiver em outra máquina da mesma rede, a tentativa em \texttt{127.0.0.1} é recusada na hora).
+\item \textbf{Validação de configuração:} \texttt{discover\_interval} e \texttt{register\_ttl} pequenos demais viram um laço sem pausa contra o Rendezvous (limite de 50 req/min), então são recusados na leitura do \texttt{config.json}.
+\end{itemize}
+
+\section{Testes e resultados}
+\textbf{Testes automatizados:} {{N_TESTES}} testes (\texttt{pytest}), todos passando. A lógica pura do jogo tem testes unitários; a rede tem testes \texttt{asyncio} com sockets reais em \texttt{127.0.0.1} (porta 0); o Rendezvous é substituído por um servidor falso com estado. Cobrem os casos de erro exigidos pela especificação (\texttt{JOIN\_ERR} em todos os motivos, \texttt{not\_your\_turn}, \texttt{letter\_already\_used}, \texttt{seq} repetido, \texttt{ttl != 1}, linha acima de 32 KiB etc.).
+
+\textbf{Cenários da especificação, com processos reais} (\texttt{tools/scenarios.py}: sobe um Rendezvous local e \texttt{python -m forca.main} para alice, bob e carol, manda os comandos e confere as linhas esperadas): \textbf{{{N_CENARIOS}}} execuções, todas aprovadas.
+
+\begin{tabularx}{\textwidth}{@{}P{0.6cm}P{4.2cm}Y@{}}
+\toprule
+\textbf{\#} & \textbf{Cenário} & \textbf{O que é verificado}\\
+\midrule
+1 & Descoberta e malha & \texttt{/conn} mostra exatamente 2 conexões em cada peer, sem duplicadas, com RTT; após \texttt{kill -9}, os outros marcam \texttt{STALE}.\\
+2 & Vitória & \texttt{GAME\_OVER WON}, \texttt{winner} e placar corretos, \texttt{hash OK}, \texttt{seq} 1..N sem falhas.\\
+3 & Derrota & \texttt{GAME\_OVER LOST}, \texttt{winner: null}, palavra revelada.\\
+4 & Jogada fora do turno & \texttt{not\_your\_turn} e nenhum \texttt{STATE} novo.\\
+5 & Letra repetida e palpite de palavra & \texttt{letter\_already\_used} sem consumir o turno; \texttt{/word} errado custa 1 vida; \texttt{/word} certo encerra.\\
+6 & Timeout de turno & \texttt{Turn timeout for ... \textemdash{} skipping}, \texttt{STATE} com \texttt{timeout: true}, vidas inalteradas.\\
+7 & Queda de jogador & 7a com \texttt{kill -9} (socket fechado) e 7b com \texttt{SIGSTOP} (processo congelado: só o \texttt{KeepAlive} percebe, após \texttt{missed 3 PINGs}). O host remove o jogador, difunde \texttt{STATE} e a partida continua.\\
+8 & Reconexão de jogador & Processo novo na mesma porta, \texttt{/join}, \texttt{rejoin: true}, \texttt{STATE} corrente, fim do rodízio.\\
+9 & Queda do host & Os jogadores mostram \texttt{Host ... unreachable \textemdash{} game aborted} e voltam a \texttt{IDLE}.\\
+10 & Encerramento limpo & A ordem é comprovada pelo log \texttt{Wire}: \texttt{GAME\_OVER ABORTED} (host) ou \texttt{LEAVE} (jogador) $\rightarrow$ \texttt{BYE} $\rightarrow$ \texttt{UNREGISTER}; também sem partida e com \texttt{Ctrl+C}. O processo termina sozinho, com código 0.\\
+\bottomrule
+\end{tabularx}
+
+Observação sobre o cenário 7: em \texttt{127.0.0.1}, um \texttt{kill -9} faz o sistema operacional fechar o socket e a queda é vista na hora; por isso a variante com \texttt{SIGSTOP}, que exercita de fato a contagem de 3 \texttt{PING}s.
+
+\textbf{Cenário 11: interoperabilidade.} O nosso cliente foi testado como jogador contra o bot oficial dos monitores (\texttt{bot@CIC}, Rendezvous público), com \texttt{tools/bot\_check.py}: (a) vitória com 2 jogadores nossos na mesma partida, (b) derrota e (c) jogador inativo: após 3 \emph{timeouts} sem custo de vida o bot enviou \texttt{BYE reason:"idle"}, que respondemos com \texttt{BYE\_OK} do mesmo \texttt{msg\_id}, e uma tentativa de voltar foi recusada com \texttt{JOIN\_ERR game\_running}, como descreve a política do bot. Em todos os casos o \texttt{word\_hash} conferiu (\texttt{hash OK}) e nenhum \texttt{STATE} foi descartado por \texttt{seq} fora de ordem.
+
+\section{Bônus implementados}\label{sec:bonus}
+
+\subsection{Chat na partida}\label{sec:chat}
+Extensão opcional \texttt{CHAT}, só entre peers com a feature \texttt{hangman}. O jogador envia \texttt{CHAT \{game\_id, text\}} ao host; o host valida (partida aberta ou em andamento, mesmo \texttt{game\_id}, autor é jogador) e repassa a todos os outros jogadores com o campo \texttt{from}; o host também pode falar. O texto tem no máximo 200 caracteres e quem recebe troca caracteres de controle por espaço (para um \texttt{\textbackslash n} não forjar linhas de log). Um cliente sem suporte responde \texttt{ERROR unknown\_type}, que é apenas registrado, e a conexão segue. O comando é \texttt{/chat <texto>}.
+
+\subsection{Migração de host}\label{sec:migracao}
+Fica desligada por padrão e só vale com \texttt{-{}-host-migration} ou \texttt{"host\_migration": true} no \texttt{config.json}. Desligada, a queda do host aborta a partida, como no cenário 9. Ligada, quando o host de uma partida em andamento cai (\texttt{peer\_stale} ou \texttt{peer\_gone}), cada jogador chega sozinho ao mesmo sucessor, sem trocar mensagens: o menor \texttt{peer\_id} entre os \texttt{players} do último \texttt{STATE}, sem contar o host antigo. Se sobrarem menos de 2 jogadores, a partida é abortada como antes, porque o sucessor vira host e host não joga.
+
+O sucessor sorteia uma palavra nova do arquivo de palavras (\texttt{words\_file}, padrão \texttt{words.txt}) e vira host com o mesmo \texttt{game\_id} e as vidas do último \texttt{STATE}. Em seguida manda aos demais \texttt{GAME\_START}, com o \texttt{word\_hash} da palavra nova, e \texttt{STATE} com \texttt{seq: 1}; os placares recomeçam em 0. Os outros jogadores esperam o \texttt{GAME\_START} do sucessor por $\mathtt{ping\_interval} \times \mathtt{ping\_miss\_limit}$ + 10 s (100 s com a configuração padrão), porque numa queda de rede cada peer só a percebe depois dos próprios \texttt{PING}s perdidos. Sem o \texttt{GAME\_START} nesse prazo, abortam.
+
+O \texttt{GAME\_START} do sucessor pode chegar antes de um jogador notar a queda. Ele só é aceito se vier do sucessor esperado, com o mesmo \texttt{game\_id}, e se o host antigo já não estiver conectado; em qualquer outro caso o jogador responde \texttt{ERROR invalid\_state}, para a partida não se dividir em duas. A regra está na decisão 23 de \texttt{docs/CONTRATO.md}.
+
+Além dos testes unitários da eleição e de \texttt{GameHost.adopt}, há um teste com quatro nós em memória, que cobre as duas ordens em que a queda pode ser percebida. Também houve uma execução real com quatro processos e \texttt{kill -9} no host: bob assumiu, carol e dave receberam o \texttt{GAME\_START} e a partida terminou em \texttt{GAME\_OVER WON} com \texttt{hash OK}.
+
+\section{Limitações conhecidas}
+\begin{itemize}
+\item \textbf{Cliente de referência:} o \texttt{pyp2p-forca} citado na especificação não foi disponibilizado. A interoperabilidade foi testada com o bot oficial, mas o nosso cliente no papel de host não foi testado contra um cliente de terceiros, só contra os nossos próprios jogadores (cenários 2 a 10).
+\item \textbf{NAT:} peers em redes diferentes só se alcançam se a porta de escuta estiver acessível (encaminhamento de porta); o Rendezvous só divulga o IP público. Todos os testes foram executados em uma única máquina; entre máquinas diferentes não foi testado.
+\item \textbf{Desvio consciente:} \texttt{ERROR} não é enviado para linha não-JSON anterior ao \texttt{HELLO} (seção~\ref{sec:decisoes}).
+\item \textbf{Migração de host:} se o host antigo só perdeu a rede e volta, não há reconciliação, e os \texttt{STATE} dele recebem \texttt{invalid\_state}. Um sucessor que perdeu só o próprio enlace com um host ainda vivo assume e fica hospedando uma partida em que os outros recusam as mensagens dele (resolve-se com \texttt{/cancel}). Clientes de terceiros não migram e abortam.
+\item Os outros bônus da especificação (modo competitivo e várias partidas por peer) não foram implementados.
+\end{itemize}
+
+\section{Divisão do trabalho e organização}
+O trabalho foi dividido em duas frentes com donos de módulo (tabela da seção 0: rede; e jogo com CLI e integração), definidas a partir de um contrato de interfaces (\texttt{docs/CONTRATO.md}) acordado e congelado antes de codificar: assinaturas, quem trata cada tipo de mensagem, decisões onde a especificação deixa margem e a ordem de encerramento. O fluxo combinado foi: um \emph{branch} por tarefa, revisão por outro integrante e \emph{merge} por \emph{pull request}. As ferramentas de apoio (\texttt{tools/}) permitem reproduzir todos os cenários descritos aqui.
+
+\end{document}

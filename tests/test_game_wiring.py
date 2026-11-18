@@ -25,6 +25,10 @@ class FakeTable:
 
     def __init__(self, net, peer_id):
         self.net, self.peer_id, self.subs = net, peer_id, {}
+        self.states: dict = {}
+
+    def state_of(self, peer_id):
+        return self.states.get(peer_id)
 
     def subscribe(self, event, callback):
         self.subs.setdefault(event, []).append(callback)
@@ -43,8 +47,8 @@ class FakeTable:
 
 
 class Node:
-    def __init__(self, net, name, features=("hangman",)):
-        self.cfg = Config(name=name, namespace="CIC")
+    def __init__(self, net, name, features=("hangman",), **cfg):
+        self.cfg = Config(name=name, namespace="CIC", **cfg)
         self.id = self.cfg.peer_id
         self.features_of_sender = features  # o que os OUTROS veem deste nó no HELLO
         self.table = FakeTable(net, self.id)
@@ -235,3 +239,73 @@ async def test_chat_outside_a_game_is_ignored_without_crashing(trio):
         FakeConn(alice.id), p.new_message("CHAT", src=alice.id, dst=bob.id, game_id="x", text="oi"))
     await alice.router.on_message(
         FakeConn(bob.id), p.new_message("CHAT", src=bob.id, dst=alice.id, game_id="x", text="oi"))
+
+
+# --- bônus 05.1: migração de host ---
+
+
+@pytest.fixture
+async def quartet(net, tmp_path, monkeypatch):
+    (tmp_path / "words.txt").write_text("casa\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    nodes = [Node(net, n, host_migration=True) for n in ("alice", "bob", "carol", "dave")]
+    yield nodes
+    for n in nodes:
+        await n.host.shutdown()
+        await n.player.leave()
+
+
+async def running_game(alice, others):
+    gid = await alice.host.create("zebra")
+    for n in others:
+        await n.player.join(alice.id, gid)
+    await alice.host.start()
+    await others[0].player.guess_letter("q")  # errada: o novo host herda 5 vidas
+    return gid
+
+
+@pytest.mark.parametrize("order", [("bob", "carol", "dave"), ("dave", "carol", "bob")])
+async def test_host_dies_and_the_smallest_peer_id_continues_the_game(net, quartet, order):
+    alice, bob, carol, dave = quartet
+    gid = await running_game(alice, [bob, carol, dave])
+    net.down.add(alice.id)  # kill -9 no host
+    by_name = {"bob": bob, "carol": carol, "dave": dave}
+    for name in order:  # nas duas ordens: sucessor primeiro (corrida) e sucessor por último
+        await by_name[name].table.fire(EVENT_STALE, alice.id)
+
+    assert bob.host.status == GameStatus.RUNNING and bob.host.game_id == gid
+    assert not bob.player.active
+    for pl in (carol.player, dave.player):
+        assert pl.state == PlayerState.PLAYING and pl.host_id == bob.id and pl.lives == 5
+        assert pl.seq >= 1 and len(pl.masked) == 4  # palavra nova ("casa")
+    # a partida segue e termina normalmente com o novo host
+    turn = bob.host._turn
+    mover = carol if turn == carol.id else dave
+    for letter in "cas":
+        mover = carol if bob.host._turn == carol.id else dave
+        await mover.player.guess_letter(letter)
+    assert bob.host.status == GameStatus.FINISHED
+    assert not carol.player.active and not dave.player.active
+
+
+async def test_with_migration_off_the_other_players_abort(net):
+    nodes = [Node(net, n) for n in ("alice", "bob", "carol")]
+    alice, bob, carol = nodes
+    await running_game(alice, [bob, carol])
+    net.down.add(alice.id)
+    for n in (bob, carol):
+        await n.table.fire(EVENT_STALE, alice.id)
+    assert not bob.player.active and not carol.player.active and not bob.host.active
+    for n in nodes:
+        await n.host.shutdown()
+
+
+async def test_wire_game_gives_the_player_a_host_alive_bound_to_the_table(net):
+    from forca.models import PeerState
+
+    node = Node(net, "bob", host_migration=True)
+    assert node.player.host_alive("alice@CIC") is False  # a tabela não conhece o peer
+    node.table.states["alice@CIC"] = PeerState.CONNECTED
+    assert node.player.host_alive("alice@CIC") is True
+    node.table.states["alice@CIC"] = PeerState.STALE
+    assert node.player.host_alive("alice@CIC") is False

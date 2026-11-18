@@ -107,3 +107,11 @@ def test_clean_text_neutralizes_control_characters_and_truncates():
     assert clean_text("x" * 300, 200) == "x" * 200
     assert clean_text("\n\t ") == ""
     assert clean_text("Olá, ação ✓") == "Olá, ação ✓"  # acentos e símbolos passam
+
+
+def test_choose_word_skips_invalid_lines_and_fails_when_none_is_valid():
+    from forca.hangman import choose_word
+
+    assert choose_word(["", "ab", "Casa", "ação!"]) == "casa"
+    with pytest.raises(ValueError):
+        choose_word(["", "x", "123"])
