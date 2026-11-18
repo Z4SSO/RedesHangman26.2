@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Gera os arquivos da entrega: o relatório em PDF e o zip só com o código-fonte.
 
     python tools/build_entrega.py                 # rascunho: marcadores {{...}} podem sobrar
@@ -202,6 +204,12 @@ def main() -> int:
     ap.add_argument("--verify-zip", action="store_true", help="extrai o zip e roda testes e cenários")
     args = ap.parse_args()
 
+    if args.final:  # todo .py precisa do cabeçalho de identificação do grupo
+        chk = subprocess.run([sys.executable, "tools/add_headers.py", "--check"], cwd=ROOT,
+                             capture_output=True, text=True)
+        if chk.returncode != 0:
+            print("FALHOU:", chk.stdout.strip(), "\nrode: python tools/add_headers.py")
+            return 1
     data = load_group()
     values = group_values(data)
     DIST.mkdir(exist_ok=True)

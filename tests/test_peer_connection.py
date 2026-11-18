@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Testes das issues 01.3 e 01.4: PeerServer/PeerConnection em 127.0.0.1, porta 0."""
 
 import asyncio

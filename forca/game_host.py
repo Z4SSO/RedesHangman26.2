@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Máquina de estados do host: lobby, turnos, validação de jogadas, STATE.
 
 Dono: Pessoa B. Issues 02.2 a 02.5. Logger: "Host". Mensagens `[Game]` para a

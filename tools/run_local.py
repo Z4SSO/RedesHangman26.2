@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Sobe N peers locais, mostra a saída de cada um e deixa mandar comandos a cada peer.
 
     python tools/run_local.py --names alice,bob,carol --base-port 8081 --namespace CIC

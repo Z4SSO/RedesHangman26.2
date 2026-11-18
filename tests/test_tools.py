@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Testes das ferramentas de apoio: Rendezvous local e utilitários do runner de cenários."""
 
 import asyncio

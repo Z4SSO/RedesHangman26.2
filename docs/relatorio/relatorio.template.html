@@ -31,10 +31,9 @@ CIC0124 &mdash; Redes de Computadores, Turma 02, 2026/2 &mdash; Universidade de 
 <table border="1" cellpadding="5" width="100%">
 <tr><th>Integrante</th><th>Matrícula</th><th>Parte do trabalho</th></tr>
 <tr><td>{{NOME_A}}</td><td>{{MAT_A}}</td><td><b>A &mdash; Rede</b>: <code>rendezvous_connection</code>, <code>peer_connection</code>, <code>peer_table</code>, <code>keep_alive</code>, <code>p2p_client</code></td></tr>
-<tr><td>{{NOME_B}}</td><td>{{MAT_B}}</td><td><b>B &mdash; Jogo</b>: <code>hangman</code>, <code>game_host</code>, <code>game_player</code></td></tr>
-<tr><td>{{NOME_C}}</td><td>{{MAT_C}}</td><td><b>C &mdash; CLI e integração</b>: <code>message_router</code>, <code>cli</code>, <code>main</code>, <code>game_wiring</code>, logs, <code>tools/run_local.py</code></td></tr>
+<tr><td>{{NOME_B}}</td><td>{{MAT_B}}</td><td><b>B &mdash; Jogo, CLI e integração</b>: <code>hangman</code>, <code>game_host</code>, <code>game_player</code>, <code>message_router</code>, <code>cli</code>, <code>main</code>, <code>game_wiring</code>, logs, <code>tools/run_local.py</code></td></tr>
 </table>
-<p class="nota">Os módulos compartilhados (<code>protocol</code>, <code>models</code>, <code>config</code>) e o contrato entre módulos (<code>docs/CONTRATO.md</code>) foram definidos e mantidos pelos três. Data de geração deste relatório: {{DATA}}.</p>
+<p class="nota">Os módulos compartilhados (<code>protocol</code>, <code>models</code>, <code>config</code>) e o contrato entre módulos (<code>docs/CONTRATO.md</code>) foram definidos e mantidos pelos dois integrantes. Data de geração deste relatório: {{DATA}}.</p>
 
 <h2>1. Visão geral</h2>
 <p>O PyP2P-Forca é um cliente peer-to-peer do <b>Jogo da Forca</b>, em Python. Cada instância (peer) se registra em um servidor <b>Rendezvous</b> central, descobre os outros peers do mesmo <i>namespace</i>, abre conexões TCP persistentes com todos eles e, sobre essas mesmas conexões, joga forca em turnos. Em cada partida, um peer assume o papel temporário de <b>host</b> (conhece a palavra, valida as jogadas e difunde o estado) e os demais são <b>jogadores</b>. O host não joga. O modo é cooperativo: as vidas são compartilhadas.</p>
@@ -148,7 +147,7 @@ python tools/bot_check.py all       # cenário 11: jogar contra o bot oficial (p
                 v                                                |
      GameHost.on_*  /  GamePlayer.on_*  --&gt; send(peer_id, msg) --+
                                             (= PeerTable.send_to)</pre>
-<p>O jogo (<code>game_host</code>, <code>game_player</code>) fala com a rede <b>apenas</b> por uma função <code>Sender</code> injetada, e nunca importa a camada de conexão. Isso permite testar toda a lógica do jogo sem abrir um socket (com um <code>Sender</code> falso) e foi essencial para B e C trabalharem em paralelo com A.</p>
+<p>O jogo (<code>game_host</code>, <code>game_player</code>) fala com a rede <b>apenas</b> por uma função <code>Sender</code> injetada, e nunca importa a camada de conexão. Isso permite testar toda a lógica do jogo sem abrir um socket (com um <code>Sender</code> falso) e foi essencial para a rede e o jogo serem desenvolvidos em paralelo.</p>
 
 <h3>3.4 Concorrência</h3>
 <p>Todo o programa roda em <b>um único <i>event loop</i> <code>asyncio</code></b>: não há threads de rede nem estado compartilhado entre threads. Regras seguidas: nada bloqueia o <i>loop</i> (a leitura do teclado vai para uma <i>thread</i> própria; arquivos usam <code>asyncio.to_thread</code>); a escrita em cada socket é protegida por um <code>asyncio.Lock</code> para que duas tarefas (host, <code>KeepAlive</code>, CLI) não misturem as linhas; toda tarefa em segundo plano é guardada e <b>cancelada no encerramento</b>; uma mensagem inválida nunca derruba o programa (vira <code>ERROR</code> ou é descartada); e nenhum laço que fala com o Rendezvous roda sem <code>asyncio.sleep</code>, porque o servidor bloqueia o IP por 1 minuto acima de 50 requisições por minuto (no uso normal são cerca de 3 por minuto por peer).</p>
@@ -251,7 +250,7 @@ Peer na tabela:
 <p><b>Reconexão com <i>backoff</i>.</b> Um peer <code>STALE</code> é tentado de novo após <code>base_backoff &times; 2<sup>n</sup></code> segundos, limitado a <code>max_backoff</code> (com os padrões: 2, 4, 8, 16, 32 s). Depois de <code>max_reconnect_attempts</code> (5) tentativas sem sucesso, vira <code>GONE</code> até reaparecer em um <code>DISCOVER</code>. A espera usa <code>asyncio.sleep</code> em tarefa própria, então um peer em espera não atrasa os outros; conectar de novo (por nós ou pelo próprio vizinho) zera a contagem. O comando <code>/reconnect</code> tenta já todos os peers <code>STALE</code>.</p>
 
 <h2>5. Decisões de projeto (onde a especificação deixa margem)</h2>
-<p>As decisões foram registradas em <code>docs/CONTRATO.md</code> (seção 6) antes de codificar, para os três módulos concordarem. As principais:</p>
+<p>As decisões foram registradas em <code>docs/CONTRATO.md</code> (seção 6) antes de codificar, para a rede e o jogo concordarem. As principais:</p>
 <ul>
 <li><b>Desempate de duplicadas:</b> menor <code>peer_id</code> (comparação de <i>strings</i>), como na especificação.</li>
 <li><b><code>/cancel</code></b> envia <code>GAME_OVER ABORTED</code> com <code>reason:"host_shutdown"</code> (a especificação lista só <code>host_shutdown</code> e <code>no_players</code>).</li>
@@ -295,7 +294,7 @@ Peer na tabela:
 </ul>
 
 <h2>9. Divisão do trabalho e organização</h2>
-<p>O trabalho foi dividido em três trilhas com donos de módulo (tabela da seção 0), definidas a partir de um <b>contrato de interfaces</b> (<code>docs/CONTRATO.md</code>) acordado e congelado antes de codificar: assinaturas, quem trata cada tipo de mensagem, decisões onde a especificação deixa margem e a ordem de encerramento. O fluxo combinado foi: um <i>branch</i> por tarefa, revisão cruzada por outro integrante (A revisa B, B revisa C, C revisa A) e <i>merge</i> por <i>pull request</i>. As ferramentas de apoio (<code>tools/</code>) permitem reproduzir todos os cenários descritos aqui.</p>
+<p>O trabalho foi dividido em duas frentes com donos de módulo (tabela da seção 0: rede; e jogo com CLI e integração), definidas a partir de um <b>contrato de interfaces</b> (<code>docs/CONTRATO.md</code>) acordado e congelado antes de codificar: assinaturas, quem trata cada tipo de mensagem, decisões onde a especificação deixa margem e a ordem de encerramento. O fluxo combinado foi: um <i>branch</i> por tarefa, revisão por outro integrante e <i>merge</i> por <i>pull request</i>. As ferramentas de apoio (<code>tools/</code>) permitem reproduzir todos os cenários descritos aqui.</p>
 
 </body>
 </html>

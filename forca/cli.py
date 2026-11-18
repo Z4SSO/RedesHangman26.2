@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Interface de comandos do usuário (/peers, /games, /create, ...).
 
 Dono: Pessoa C. Issues 03.3 e 03.4. Logger: "CLI". A leitura do teclado NÃO pode

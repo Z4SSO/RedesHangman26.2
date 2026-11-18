@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Servidor Rendezvous local mínimo, com a mesma API do servidor público.
 
     python tools/rdv_local.py --port 18080
