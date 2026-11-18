@@ -52,6 +52,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--rdv-host", dest="rdv_host")
     ap.add_argument("--rdv-port", type=int, dest="rdv_port")
     ap.add_argument("--log-file", dest="log_file")
+    ap.add_argument("--host-migration", action="store_true", default=None, dest="host_migration",
+                    help="bônus: se o host cair, o menor peer_id assume a partida")
     ap.add_argument("--log-level", default="INFO", type=_level_arg, help="nível mostrado na tela")
     return ap.parse_args(argv)
 
@@ -66,7 +68,7 @@ def build_config(args: argparse.Namespace) -> Config:
     cfg = load_config(
         args.config,
         {k: getattr(args, k) for k in
-         ("name", "namespace", "listen_port", "rdv_host", "rdv_port", "log_file")},
+         ("name", "namespace", "listen_port", "rdv_host", "rdv_port", "log_file", "host_migration")},
     )
     for field in ("listen_port", "rdv_port"):
         port = getattr(cfg, field)

@@ -20,10 +20,10 @@ Implementar a eleição e o recomeço de partida conforme o bônus da especifica
 
 ## Dentro do escopo
 
-- [ ] Ao `peer_stale` do host, o menor `peer_id` entre os `players` do último `STATE` vira host
-- [ ] Novo host sorteia palavra, calcula novo `word_hash` e envia `GAME_START` com o mesmo `game_id` aos demais
-- [ ] A partida recomeça com as vidas do último `STATE`
-- [ ] Atualizar contrato e testes
+- [x] Ao `peer_stale` do host, o menor `peer_id` entre os `players` do último `STATE` vira host
+- [x] Novo host sorteia palavra, calcula novo `word_hash` e envia `GAME_START` com o mesmo `game_id` aos demais
+- [x] A partida recomeça com as vidas do último `STATE`
+- [x] Atualizar contrato e testes
 
 ## Fora do escopo
 
@@ -31,8 +31,8 @@ Implementar a eleição e o recomeço de partida conforme o bônus da especifica
 
 ## Critérios de aceite
 
-- [ ] Com `kill -9` no host, a partida continua com um novo host
-- [ ] O cenário 9 original continua válido quando o bônus está desligado/ não há jogadores suficientes
+- [x] Com `kill -9` no host, a partida continua com um novo host
+- [x] O cenário 9 original continua válido quando o bônus está desligado/ não há jogadores suficientes
 
 ## Itens a estudar
 
