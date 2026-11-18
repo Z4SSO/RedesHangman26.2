@@ -46,7 +46,7 @@
 \section{Visão geral}
 O PyP2P-Forca é um cliente peer-to-peer do Jogo da Forca, escrito em Python. Cada instância (peer) se registra em um servidor Rendezvous central, descobre os outros peers do mesmo \emph{namespace}, abre conexões TCP persistentes com todos eles e joga forca em turnos por essas mesmas conexões. Em cada partida, um peer faz o papel de host: conhece a palavra, valida as jogadas e difunde o estado. Os demais são jogadores. O host não joga, e o modo é cooperativo, com vidas compartilhadas.
 
-O protocolo segue a especificação do professor. O projeto implementa todas as mensagens, as regras do jogo, as máquinas de estado do host e do jogador, a tolerância a falhas (queda de jogador, reconexão, queda do host) e o encerramento ordenado, além do bônus de chat (mensagem \texttt{CHAT}, seção~\ref{sec:chat}).
+O protocolo segue a especificação do professor. O projeto implementa todas as mensagens, as regras do jogo, as máquinas de estado do host e do jogador, a tolerância a falhas (queda de jogador, reconexão, queda do host) e o encerramento ordenado, além de dois bônus da especificação: o chat na partida e a migração de host, que fica desligada por padrão (seção~\ref{sec:bonus}).
 
 \section{Como executar}
 
@@ -77,7 +77,7 @@ pip install -r requirements-dev.txt     # só necessário para os testes
 \begin{codigo}
 python -m forca.main --name alice --namespace CIC --port 8081
 \end{codigo}
-Opções: \texttt{--name}, \texttt{--namespace}, \texttt{--port} (porta de escuta), \texttt{--rdv-host} e \texttt{--rdv-port} (outro Rendezvous), \texttt{--log-file} (grava todos os logs, inclusive o JSON bruto em DEBUG), \texttt{--log-level} (nível mostrado na tela) e \texttt{--config} (arquivo JSON, padrão \texttt{config.json}). A precedência é: linha de comando $>$ \texttt{config.json} $>$ padrão. Chaves desconhecidas ou valores inválidos no JSON geram uma mensagem de erro clara.
+Opções: \texttt{-{}-name}, \texttt{-{}-namespace}, \texttt{-{}-port} (porta de escuta), \texttt{-{}-rdv-host} e \texttt{-{}-rdv-port} (outro Rendezvous), \texttt{-{}-log-file} (grava todos os logs, inclusive o JSON bruto em DEBUG), \texttt{-{}-log-level} (nível mostrado na tela), \texttt{-{}-config} (arquivo JSON, padrão \texttt{config.json}) e \texttt{-{}-host-migration} (liga o bônus de migração de host, seção~\ref{sec:migracao}). A precedência é: linha de comando $>$ \texttt{config.json} $>$ padrão. Chaves desconhecidas ou valores inválidos no JSON geram uma mensagem de erro clara.
 
 \textbf{Três peers na mesma máquina} (três terminais, ou um comando só com \texttt{tools/run\_local.py}, que sobe todos e permite mandar comandos a cada um e matar um deles):
 \begin{codigo}
@@ -99,7 +99,7 @@ python tools/run_local.py --names alice,bob,carol --namespace CIC-grupo
 \texttt{/conn}, \texttt{/rtt} & conexões ativas (entrada/saída, estado, RTT) e RTT médio por peer\\
 \texttt{/reconnect} & força a reconciliação imediata com o Rendezvous\\
 \texttt{/games} & pergunta a todos os vizinhos e lista as partidas abertas\\
-\texttt{/create <palavra> [max]}, \texttt{/create --random [max]} & cria partida e vira host (palavra informada ou sorteada de \texttt{words.txt})\\
+\texttt{/create <palavra> [max]}, \texttt{/create -{}-random [max]} & cria partida e vira host (palavra informada ou sorteada de \texttt{words.txt})\\
 \texttt{/start}, \texttt{/cancel} & inicia (exige pelo menos 1 jogador) ou cancela a partida hospedada\\
 \texttt{/join <host>}, \texttt{/leave} & entra em / sai de uma partida\\
 \texttt{/guess <letra>}, \texttt{/word <palavra>} & palpite de letra ou de palavra inteira\\
@@ -278,7 +278,7 @@ Quando o host se encerra, o resultado é \texttt{ABORTED} com \texttt{reason} (\
 \midrule
 Jogador cai & \texttt{PONG} ausente $\times$3 ou socket fechado & O host o remove da partida e difunde \texttt{STATE}; se era a vez dele, passa o turno; se não resta jogador, \texttt{ABORTED} (\texttt{no\_players}).\\
 Jogador volta & \texttt{JOIN} de \texttt{src} já conhecido em partida \texttt{RUNNING} & \texttt{JOIN\_OK rejoin:true} + \texttt{STATE} corrente; vai ao fim do rodízio.\\
-Host cai & \texttt{PONG} ausente $\times$3 ou socket fechado & O jogador encerra a partida localmente, mostra \texttt{[Game] Host alice@CIC unreachable \textemdash{} game aborted} e volta a \texttt{IDLE}.\\
+Host cai & \texttt{PONG} ausente $\times$3 ou socket fechado & Sem a migração (padrão), o jogador encerra a partida localmente, mostra \texttt{[Game] Host alice@CIC unreachable \textemdash{} game aborted} e volta a \texttt{IDLE}. Com \texttt{-{}-host-migration}, o jogador de menor \texttt{peer\_id} assume como host (seção~\ref{sec:migracao}).\\
 Host encerra (\texttt{/quit}) & \texttt{GAME\_OVER ABORTED} + \texttt{BYE} & Os jogadores voltam a \texttt{IDLE}.\\
 \texttt{STATE} fora de ordem & \texttt{seq} $\le$ último aplicado & Descartado (registrado em DEBUG).\\
 \texttt{GUESS} fora da vez & \texttt{src} $\ne$ \texttt{turn} & \texttt{GUESS\_RESULT not\_your\_turn}, sem \texttt{STATE}.\\
@@ -327,15 +327,27 @@ Observação sobre o cenário 7: em \texttt{127.0.0.1}, um \texttt{kill -9} faz 
 
 \textbf{Cenário 11: interoperabilidade.} O nosso cliente foi testado como jogador contra o bot oficial dos monitores (\texttt{bot@CIC}, Rendezvous público), com \texttt{tools/bot\_check.py}: (a) vitória com 2 jogadores nossos na mesma partida, (b) derrota e (c) jogador inativo: após 3 \emph{timeouts} sem custo de vida o bot enviou \texttt{BYE reason:"idle"}, que respondemos com \texttt{BYE\_OK} do mesmo \texttt{msg\_id}, e uma tentativa de voltar foi recusada com \texttt{JOIN\_ERR game\_running}, como descreve a política do bot. Em todos os casos o \texttt{word\_hash} conferiu (\texttt{hash OK}) e nenhum \texttt{STATE} foi descartado por \texttt{seq} fora de ordem.
 
-\section{Bônus implementado: chat na partida}\label{sec:chat}
+\section{Bônus implementados}\label{sec:bonus}
+
+\subsection{Chat na partida}\label{sec:chat}
 Extensão opcional \texttt{CHAT}, só entre peers com a feature \texttt{hangman}. O jogador envia \texttt{CHAT \{game\_id, text\}} ao host; o host valida (partida aberta ou em andamento, mesmo \texttt{game\_id}, autor é jogador) e repassa a todos os outros jogadores com o campo \texttt{from}; o host também pode falar. O texto tem no máximo 200 caracteres e quem recebe troca caracteres de controle por espaço (para um \texttt{\textbackslash n} não forjar linhas de log). Um cliente sem suporte responde \texttt{ERROR unknown\_type}, que é apenas registrado, e a conexão segue. O comando é \texttt{/chat <texto>}.
+
+\subsection{Migração de host}\label{sec:migracao}
+Fica desligada por padrão e só vale com \texttt{-{}-host-migration} ou \texttt{"host\_migration": true} no \texttt{config.json}. Desligada, a queda do host aborta a partida, como no cenário 9. Ligada, quando o host de uma partida em andamento cai (\texttt{peer\_stale} ou \texttt{peer\_gone}), cada jogador chega sozinho ao mesmo sucessor, sem trocar mensagens: o menor \texttt{peer\_id} entre os \texttt{players} do último \texttt{STATE}, sem contar o host antigo. Se sobrarem menos de 2 jogadores, a partida é abortada como antes, porque o sucessor vira host e host não joga.
+
+O sucessor sorteia uma palavra nova do arquivo de palavras (\texttt{words\_file}, padrão \texttt{words.txt}) e vira host com o mesmo \texttt{game\_id} e as vidas do último \texttt{STATE}. Em seguida manda aos demais \texttt{GAME\_START}, com o \texttt{word\_hash} da palavra nova, e \texttt{STATE} com \texttt{seq: 1}; os placares recomeçam em 0. Os outros jogadores esperam o \texttt{GAME\_START} do sucessor por $\mathtt{ping\_interval} \times \mathtt{ping\_miss\_limit}$ + 10 s (100 s com a configuração padrão), porque numa queda de rede cada peer só a percebe depois dos próprios \texttt{PING}s perdidos. Sem o \texttt{GAME\_START} nesse prazo, abortam.
+
+O \texttt{GAME\_START} do sucessor pode chegar antes de um jogador notar a queda. Ele só é aceito se vier do sucessor esperado, com o mesmo \texttt{game\_id}, e se o host antigo já não estiver conectado; em qualquer outro caso o jogador responde \texttt{ERROR invalid\_state}, para a partida não se dividir em duas. A regra está na decisão 23 de \texttt{docs/CONTRATO.md}.
+
+Além dos testes unitários da eleição e de \texttt{GameHost.adopt}, há um teste com quatro nós em memória, que cobre as duas ordens em que a queda pode ser percebida. Também houve uma execução real com quatro processos e \texttt{kill -9} no host: bob assumiu, carol e dave receberam o \texttt{GAME\_START} e a partida terminou em \texttt{GAME\_OVER WON} com \texttt{hash OK}.
 
 \section{Limitações conhecidas}
 \begin{itemize}
 \item \textbf{Cliente de referência:} o \texttt{pyp2p-forca} citado na especificação não foi disponibilizado. A interoperabilidade foi testada com o bot oficial, mas o nosso cliente no papel de host não foi testado contra um cliente de terceiros, só contra os nossos próprios jogadores (cenários 2 a 10).
 \item \textbf{NAT:} peers em redes diferentes só se alcançam se a porta de escuta estiver acessível (encaminhamento de porta); o Rendezvous só divulga o IP público. Todos os testes foram executados em uma única máquina; entre máquinas diferentes não foi testado.
 \item \textbf{Desvio consciente:} \texttt{ERROR} não é enviado para linha não-JSON anterior ao \texttt{HELLO} (seção~\ref{sec:decisoes}).
-\item Os demais bônus da especificação (migração de host, modo competitivo, múltiplas partidas) não foram incluídos nesta entrega.
+\item \textbf{Migração de host:} se o host antigo só perdeu a rede e volta, não há reconciliação, e os \texttt{STATE} dele recebem \texttt{invalid\_state}. Um sucessor que perdeu só o próprio enlace com um host ainda vivo assume e fica hospedando uma partida em que os outros recusam as mensagens dele (resolve-se com \texttt{/cancel}). Clientes de terceiros não migram e abortam.
+\item Os outros bônus da especificação (modo competitivo e várias partidas por peer) não foram implementados.
 \end{itemize}
 
 \section{Divisão do trabalho e organização}
