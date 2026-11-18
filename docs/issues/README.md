@@ -72,7 +72,7 @@
 
 | | Issue | Prazo | Depende de |
 |---|---|---|---|
-| [ ] | [05.1](05-1-bonus-migracao-host.md) Bônus: migração de host | Qua 18/11 (manhã) | 04.4 |
+| [x] | [05.1](05-1-bonus-migracao-host.md) Bônus: migração de host | Qua 18/11 (manhã) | 04.4 |
 | [x] | [05.2](05-2-bonus-chat.md) Bônus: chat na partida | Qua 18/11 (manhã) | 04.3 |
 
 ## Revisão cruzada
