@@ -20,9 +20,9 @@ Adicionar `CHAT` ao protocolo (contrato primeiro) e o comando `/chat <texto>`.
 
 ## Dentro do escopo
 
-- [ ] Definir `CHAT` em `docs/CONTRATO.md` e `protocol.py`
-- [ ] `GameHost` difunde o texto a todos com o remetente
-- [ ] `/chat <texto>` na CLI e exibição `[Game]`
+- [x] Definir `CHAT` em `docs/CONTRATO.md` e `protocol.py`
+- [x] `GameHost` difunde o texto a todos com o remetente
+- [x] `/chat <texto>` na CLI e exibição `[Game]`
 
 ## Fora do escopo
 
@@ -30,8 +30,8 @@ Adicionar `CHAT` ao protocolo (contrato primeiro) e o comando `/chat <texto>`.
 
 ## Critérios de aceite
 
-- [ ] Mensagem de um jogador aparece para todos os demais
-- [ ] Peers sem suporte ignoram sem quebrar (`unknown_type` não derruba a conexão)
+- [x] Mensagem de um jogador aparece para todos os demais
+- [x] Peers sem suporte ignoram sem quebrar (`unknown_type` não derruba a conexão)
 
 ## Itens a estudar
 

@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 
-from forca.hangman import Hangman, normalize_word, word_hash
+from forca.hangman import Hangman, clean_text, normalize_word, word_hash
 
 
 def test_normalize_removes_accents_and_lowercases():
@@ -97,3 +97,11 @@ def test_lost_exactly_when_lives_hit_zero():
 def test_secret_word_is_normalized():
     g = Hangman("Açaí")
     assert g.word == "acai" and g.word_length == 4
+
+
+def test_clean_text_neutralizes_control_characters_and_truncates():
+    assert clean_text("oi\n[Host] falso\r\x1b[31m!") == "oi [Host] falso  [31m!"
+    assert clean_text("   ola  ") == "ola"
+    assert clean_text("x" * 300, 200) == "x" * 200
+    assert clean_text("\n\t ") == ""
+    assert clean_text("Olá, ação ✓") == "Olá, ação ✓"  # acentos e símbolos passam

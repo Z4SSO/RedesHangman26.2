@@ -172,6 +172,7 @@ Tabela de despacho (quem trata cada tipo):
 | `GUESS` | jogador | `GameHost.on_guess` |
 | `GUESS_RESULT` | host | `GamePlayer.on_guess_result` |
 | `GAME_OVER` | host | `GamePlayer.on_game_over` |
+| `CHAT` (bônus 05.2) | jogador → host; host → jogadores | `wire_game` despacha para `GameHost.on_chat` se o host estiver ativo, senão `GamePlayer.on_chat` |
 
 Peer que não anunciou `"hangman"` no HELLO (`conn.features`): o roteador não entrega nem aceita mensagens de lobby/partida dele.
 
@@ -307,6 +308,7 @@ Se o professor responder diferente, altere aqui e avise.
 19. **Todo `GAME_OVER` do host passa por `FINISHED`** (60 s, depois `IDLE`): `WON`, `LOST` e `ABORTED` (`host_shutdown` e `no_players`), como no diagrama e na decisão 12. Só o `/quit` (`shutdown`) limpa tudo na hora.
 20. **`last_guess` repetido:** o jogador só anuncia o `last_guess` quando ele muda (o `STATE` de um `LEAVE`, queda ou rejoin repete o anterior).
 21. **Anti-spoof:** o roteador descarta (WARNING, sem resposta) toda mensagem cujo `src` não é o `peer_id` da conexão por onde chegou, e só aceita a resposta de um `request()` vinda do peer para quem ele foi enviado. A especificação não cobre; sem isso um vizinho conectado jogaria no lugar de outro.
+22. **`CHAT` (bônus 05.2):** extensão opcional, só entre peers com a feature `hangman`. Jogador → host: `CHAT {game_id, text}`. O host valida (partida `OPEN`/`RUNNING`, mesmo `game_id`, `src` entre os jogadores; senão `ERROR invalid_state`, como na decisão 15) e repassa `CHAT {game_id, text, from}` a **todos os outros** jogadores, sem eco ao autor; `src` do repasse é o host e `from` é o autor. O host também pode falar (`from` = ele mesmo). `text` tem no máximo 200 caracteres (`protocol.CHAT_MAX_LEN`); quem recebe troca caracteres de controle por espaço e corta (`hangman.clean_text`), para um `\n` não forjar linhas de log. O jogador só aceita `CHAT` do host da partida atual. Um cliente sem suporte responde `ERROR unknown_type`, que o roteador só registra (a conexão segue). Mostrado em `[Game] <autor>: <texto>`; o comando é `/chat <texto>` (18ª linha do `/help`, marcada como bônus).
 
 ## 7. Logging
 

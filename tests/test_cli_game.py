@@ -308,3 +308,29 @@ async def test_status_of_a_finished_hosted_game_is_still_shown_when_not_playing(
     caplog.clear()
     await run(w.alice, "/status")
     assert "status: FINISHED" in "\n".join(out(caplog, "Game"))
+
+
+# --- bônus 05.2: /chat ---
+
+
+async def test_chat_command_as_host_and_as_player(w, caplog):
+    gid = await w.alice.host.create("casa")
+    await w.bob.player.join(w.alice.id, gid)
+    await w.alice.host.start()
+    caplog.clear()
+    await run(w.bob, "/chat oi   alice")
+    await run(w.alice, "/chat bem-vindo")
+    shown = out(caplog, "Game")
+    assert "você: oi alice" in shown and f"{w.bob.id}: oi alice" in shown
+    assert "você: bem-vindo" in shown and f"{w.alice.id}: bem-vindo" in shown
+
+
+async def test_chat_command_errors(w, caplog):
+    await run(w.alice, "/chat oi", "/chat")
+    msgs = out(caplog)
+    assert "Você não está em uma partida." in msgs and "uso: /chat <texto>" in msgs
+    gid = await w.alice.host.create("casa")
+    await w.bob.player.join(w.alice.id, gid)
+    caplog.clear()
+    await run(w.bob, "/chat " + "x" * 201)
+    assert any("longa demais" in m for m in out(caplog)) and not out(caplog, "Game")

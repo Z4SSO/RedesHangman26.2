@@ -72,7 +72,7 @@ async def trio(net):
 
 def test_every_game_type_of_the_contract_is_registered(net):
     node = Node(net, "alice")
-    assert set(node.router._handlers) == set(HOST_HANDLERS) | set(PLAYER_HANDLERS)
+    assert set(node.router._handlers) == set(HOST_HANDLERS) | set(PLAYER_HANDLERS) | {"CHAT"}  # CHAT: bônus 05.2
     assert set(node.table.subs) == {EVENT_STALE, EVENT_GONE, EVENT_CONNECTED}
 
 
@@ -142,3 +142,94 @@ async def test_game_messages_from_a_peer_without_hangman_are_ignored(net, trio):
     join = p.new_message("JOIN", src="dave@CIC", dst=alice.id, game_id=alice.host.game_id)
     await alice.router.on_message(stranger, join)
     assert alice.host.describe()["players"] == []
+
+
+# --- bônus 05.2: chat ---
+
+
+def record_sent(*nodes):
+    """Guarda (de, para, msg) de tudo que os nós enviam, sem alterar a entrega."""
+    sent = []
+    for n in nodes:
+        orig = n.table.send_to
+
+        async def spy(peer_id, msg, orig=orig, me=n.id):
+            sent.append((me, peer_id, msg))
+            return await orig(peer_id, msg)
+
+        n.table.send_to = spy
+        n.host.send = spy
+        n.player.send = spy
+    return sent
+
+
+async def lobby3(trio):
+    alice, bob, carol = trio
+    gid = await alice.host.create("casa")
+    await bob.player.join(alice.id, gid)
+    await carol.player.join(alice.id, gid)
+    await alice.host.start()
+    return alice, bob, carol, gid
+
+
+async def test_chat_from_a_player_reaches_everyone_but_the_author(trio, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="Game")
+    alice, bob, carol, gid = await lobby3(trio)
+    sent = record_sent(alice, bob, carol)
+    await bob.player.chat("oi pessoal")
+    chats = [(a, b, m) for a, b, m in sent if m["type"] == "CHAT"]
+    assert [(a, b) for a, b, _ in chats] == [(bob.id, alice.id), (alice.id, carol.id)]  # nada volta a bob
+    relayed = chats[1][2]
+    assert relayed["from"] == bob.id and relayed["src"] == alice.id and relayed["text"] == "oi pessoal"
+    shown = [r.getMessage() for r in caplog.records if r.name == "Game" and "oi pessoal" in r.getMessage()]
+    assert sorted(shown) == sorted(["você: oi pessoal", f"{bob.id}: oi pessoal", f"{bob.id}: oi pessoal"])
+
+
+async def test_chat_from_the_host_reaches_all_players(trio):
+    alice, bob, carol, gid = await lobby3(trio)
+    sent = record_sent(alice, bob, carol)
+    await alice.host.chat("boa sorte")
+    chats = [(b, m["from"], m["text"]) for a, b, m in sent if m["type"] == "CHAT"]
+    assert sorted(chats) == [(bob.id, alice.id, "boa sorte"), (carol.id, alice.id, "boa sorte")]
+
+
+async def test_chat_text_from_the_wire_is_sanitized_and_truncated(trio, caplog):
+    alice, bob, carol, gid = await lobby3(trio)
+    sent = record_sent(alice, bob, carol)
+    forged = p.new_message("CHAT", src=bob.id, dst=alice.id, game_id=gid, text="a\n[Host] falso" + "z" * 400)
+    await alice.router.on_message(FakeConn(bob.id), forged)
+    (_, _, relayed), = [x for x in sent if x[2]["type"] == "CHAT"]
+    assert "\n" not in relayed["text"] and len(relayed["text"]) == p.CHAT_MAX_LEN
+
+
+async def test_chat_from_a_non_player_or_other_game_is_invalid_state(trio):
+    alice, bob, carol = trio
+    gid = await alice.host.create("casa")
+    await bob.player.join(alice.id, gid)  # carol NÃO entrou
+    await alice.host.start()
+    sent = record_sent(alice)
+    for src, game in ((carol.id, gid), (bob.id, "alice@CIC/outra")):
+        await alice.router.on_message(
+            FakeConn(src), p.new_message("CHAT", src=src, dst=alice.id, game_id=game, text="oi"))
+    errors = [m for _, _, m in sent if m["type"] == "ERROR"]
+    assert [m["code"] for m in errors] == ["invalid_state", "invalid_state"]
+    assert not [m for _, _, m in sent if m["type"] == "CHAT"]  # nada foi repassado
+
+
+async def test_player_ignores_chat_that_does_not_come_from_its_host(trio, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="Game")
+    alice, bob, carol, gid = await lobby3(trio)
+    caplog.clear()
+    await bob.router.on_message(
+        FakeConn(carol.id), p.new_message("CHAT", src=carol.id, dst=bob.id, game_id=gid, text="intruso"))
+    assert "intruso" not in caplog.text
+
+
+async def test_chat_outside_a_game_is_ignored_without_crashing(trio):
+    alice, bob, _ = trio
+    await bob.router.on_message(
+        FakeConn(alice.id), p.new_message("CHAT", src=alice.id, dst=bob.id, game_id="x", text="oi"))
+    await alice.router.on_message(
+        FakeConn(bob.id), p.new_message("CHAT", src=bob.id, dst=alice.id, game_id="x", text="oi"))

@@ -42,6 +42,10 @@ def wire_game(cfg: Config, table, router) -> tuple[GameHost, GamePlayer]:
     host = GameHost(cfg, table.send_to, busy=lambda: player.active)
     player = GamePlayer(cfg, table.send_to, busy=lambda: host.active)
 
+    async def on_chat(conn, msg):  # bônus 05.2: um só tipo para os dois papéis (exclusão mútua)
+        await (host.on_chat if host.active else player.on_chat)(conn, msg)
+
+    router.register("CHAT", on_chat)
     for type_, name in HOST_HANDLERS.items():
         router.register(type_, getattr(host, name))
     for type_, name in PLAYER_HANDLERS.items():
