@@ -80,4 +80,4 @@ Veja o quadro de progresso em [`docs/issues/README.md`](docs/issues/README.md).
 
 - **Interoperabilidade:** o cliente de referência `pyp2p-forca` não foi disponibilizado; testamos o nosso cliente como jogador contra o bot oficial (`bot@CIC`) e como host/jogador entre os nossos próprios clientes.
 - **NAT:** peers em redes diferentes só se alcançam se a porta de escuta estiver acessível (encaminhamento de porta); o Rendezvous só divulga o IP público. Entre máquinas da mesma rede local atrás do mesmo roteador, a conexão depende de o roteador permitir *hairpin*.
-- Bônus: o chat na partida (`/chat`) está implementado; migração de host, modo competitivo e múltiplas partidas não fazem parte desta entrega.
+- Bônus implementados: chat na partida (`/chat`) e migração de host, desligada por padrão (`--host-migration` ou `"host_migration": true`; regras e limitações na decisão 23 de [`docs/CONTRATO.md`](docs/CONTRATO.md)). Modo competitivo e várias partidas por peer não foram implementados.

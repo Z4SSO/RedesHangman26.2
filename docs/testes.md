@@ -1,12 +1,12 @@
 # Testes e evidências
 
-Gerado em 17/11/2026 sobre o commit `f9a25ab` (branch `feat/04-integracao`). A contagem de testes foi atualizada em 18/11/2026 (368, após o bônus de chat); a saída abaixo é a **saída literal** dos scripts; para reproduzir, veja a seção seguinte.
+Gerado em 17/11/2026 sobre o commit `f9a25ab` (branch `feat/04-integracao`). A contagem de testes foi atualizada em 18/11/2026 (393, após os bônus de chat e de migração de host); a saída abaixo é a **saída literal** dos scripts; para reproduzir, veja a seção seguinte.
 
 ## Como reproduzir
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
-python -m pytest -q                    # 368 testes (unitários e de rede em 127.0.0.1)
+python -m pytest -q                    # 393 testes (unitários e de rede em 127.0.0.1)
 python tools/scenarios.py              # cenários 1 a 10, processos reais, ~25 s; --list / --only 7a,8
 python tools/bot_check.py all          # cenário 11 contra o bot oficial; precisa de internet, ~5 min
 ```
@@ -162,5 +162,5 @@ O JSON bruto trocado com o bot ficou em `logs/bot/*.wire.log` (não versionado).
 - **NAT entre máquinas:** peers em redes diferentes só se alcançam com a porta de escuta acessível; o Rendezvous não ajuda nisso. Não foi testado entre máquinas diferentes.
 - **RTT** é registrado em `INFO` (`[KeepAlive] bob@CIC RTT=41.7 ms (avg 43.2 ms)`), uma linha por vizinho a cada `ping_interval`.
 - **Pendências menores já identificadas, fora da parte A** (a repassar ao dono de cada módulo): a mensagem `Host ... unreachable — game aborted` sai duas vezes (loggers `Player` e `Game`); a linha `STATE seq=N ignored` está em `DEBUG` (não aparece na tela com o nível padrão). O `/reconnect` e o "É a sua vez!" num `STATE` final já foram corrigidos (PR #9).
-- **Bônus:** o chat na partida foi implementado (PR #11, testes em `tests/test_game_wiring.py`); migração de host, modo competitivo e múltiplas partidas não fazem parte desta entrega.
+- **Bônus:** o chat na partida (PR #11) e a migração de host (PR #12, desligada por padrão; decisão 23 do contrato) foram implementados, com testes em `tests/test_game_player.py`, `tests/test_game_host.py` e `tests/test_game_wiring.py`. A migração também foi exercitada com `kill -9` real no host em 4 processos (registro no PR #12). Os cenários 1 a 10 rodam com ela desligada (o padrão). Modo competitivo e várias partidas por peer não foram implementados.
 - Os cenários automatizados usam tempos curtos (PING 1 s, turno 6 s) para rodar em segundos; os valores padrão da especificação (30 s) foram exercitados contra o bot.
