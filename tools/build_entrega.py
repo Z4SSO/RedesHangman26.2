@@ -9,29 +9,29 @@
     python tools/build_entrega.py --no-run        # reaproveita os números do último build
 
 Dados do grupo: docs/entrega.json (veja docs/entrega.exemplo.json). O relatório vem de
-docs/relatorio/relatorio.template.html + docs/relatorio/exemplos.json (mensagens reais
+docs/relatorio/relatorio.template.tex + docs/relatorio/exemplos.json (mensagens reais
 capturadas dos logs). Os números de testes e de cenários são MEDIDOS a cada build, não
-digitados. O PDF é gerado pelo Chrome/Chromium headless (ou, se não houver, pelo LibreOffice), sem dependências Python extras.
-Saída em dist/ (ignorado pelo git).
+digitados. O PDF é compilado com pdflatex (no Ubuntu: texlive-latex-recommended,
+texlive-latex-extra e texlive-lang-portuguese). Saída em dist/: o .tex preenchido, o PDF e o zip.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
-import html
 import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
-TEMPLATE = ROOT / "docs" / "relatorio" / "relatorio.template.html"
+TEMPLATE = ROOT / "docs" / "relatorio" / "relatorio.template.tex"
 EXAMPLES = ROOT / "docs" / "relatorio" / "exemplos.json"
 DATA_FILE = ROOT / "docs" / "entrega.json"
 METRICS = DIST / "metricas.json"
@@ -99,7 +99,28 @@ def render_json(obj: dict) -> str:
     return "{\n" + ",\n".join(lines) + "\n}"
 
 
-def build_html(values: dict[str, str], metrics: dict) -> str:
+TEX_SPECIAL = {c: "\\" + c for c in "&%$#_{}"} | {"~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+                                                  "\\": r"\textbackslash{}"}
+
+
+def tex_escape(value: str) -> str:
+    """Texto do usuário (nomes, matrículas) -> LaTeX seguro."""
+    return "".join(TEX_SPECIAL.get(c, c) for c in value)
+
+
+def wrap_lines(text: str, width: int = 100) -> str:
+    """Quebra linhas longas de um bloco Verbatim (que não quebra sozinho) com recuo de continuação."""
+    out = []
+    for line in text.splitlines():
+        if len(line) <= width:
+            out.append(line)
+            continue
+        indent = " " * (len(line) - len(line.lstrip()) + 4)
+        out.extend(textwrap.wrap(line, width, subsequent_indent=indent, break_on_hyphens=False))
+    return "\n".join(out)
+
+
+def build_tex(values: dict[str, str], metrics: dict) -> str:
     text = TEMPLATE.read_text(encoding="utf-8")
     examples = json.loads(EXAMPLES.read_text(encoding="utf-8"))
 
@@ -107,7 +128,7 @@ def build_html(values: dict[str, str], metrics: dict) -> str:
         name = match.group(1)
         if name not in examples:
             raise SystemExit(f"exemplo desconhecido no template: {name}")
-        return f"<pre>{html.escape(render_json(examples[name]), quote=False)}</pre>"
+        return "\\begin{codigo}\n" + wrap_lines(render_json(examples[name])) + "\n\\end{codigo}"
 
     text = re.sub(r"\{\{EX:(\w+)\}\}", example, text)
     values = dict(values)
@@ -117,36 +138,27 @@ def build_html(values: dict[str, str], metrics: dict) -> str:
     if "cenarios" in metrics:
         values["N_CENARIOS"] = f"{metrics['cenarios']}/{metrics['cenarios']}"
     for key, value in values.items():
-        text = text.replace("{{" + key + "}}", html.escape(value, quote=False))
+        text = text.replace("{{" + key + "}}", tex_escape(value))
     return text
 
 
-def to_pdf(html_path: Path) -> Path:
-    """HTML -> PDF. Prefere o Chrome (impressão headless, CSS completo); o LibreOffice é a reserva."""
-    pdf = html_path.with_suffix(".pdf")
+def to_pdf(tex_path: Path) -> Path:
+    """.tex -> PDF com pdflatex (duas passadas, para as referências \\ref)."""
+    pdflatex = shutil.which("pdflatex")
+    if pdflatex is None:
+        raise SystemExit("pdflatex não encontrado. No Ubuntu: sudo apt install texlive-latex-recommended "
+                         "texlive-latex-extra texlive-lang-portuguese")
+    pdf = tex_path.with_suffix(".pdf")
     pdf.unlink(missing_ok=True)
-    chrome = next((p for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
-                   if (p := shutil.which(n))), None)
-    if chrome:
-        with tempfile.TemporaryDirectory() as profile:
-            subprocess.run(
-                [chrome, "--headless=new", "--disable-gpu", "--no-sandbox", f"--user-data-dir={profile}",
-                 "--no-pdf-header-footer", f"--print-to-pdf={pdf}", html_path.resolve().as_uri()],
-                capture_output=True, timeout=180)
-        if pdf.exists() and pdf.stat().st_size > 0:
-            return pdf
-        print("o Chrome não gerou o PDF; tentando o LibreOffice")
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-    if soffice is None:
-        raise SystemExit("nem Chrome/Chromium nem LibreOffice disponíveis para gerar o PDF")
-    with tempfile.TemporaryDirectory() as profile:  # perfil temporário: não depende de outra instância aberta
-        subprocess.run(
-            [soffice, f"-env:UserInstallation=file://{profile}", "--headless",
-             "--infilter=HTML (StarWriter)", "--convert-to", "pdf:writer_pdf_Export",
-             "--outdir", str(html_path.parent), str(html_path)],
-            capture_output=True, timeout=180)
-    if not pdf.exists():
-        raise SystemExit("não foi possível gerar o PDF")
+    with tempfile.TemporaryDirectory() as build:  # .aux/.log/.out ficam fora do dist/
+        for _ in range(2):
+            r = subprocess.run([pdflatex, "-interaction=nonstopmode", "-halt-on-error",
+                                f"-output-directory={build}", str(tex_path)],
+                               cwd=tex_path.parent, capture_output=True, text=True, errors="replace",
+                               timeout=180)  # o log do pdflatex sai em latin-1
+            if r.returncode != 0:
+                raise SystemExit(f"pdflatex falhou:\n{r.stdout[-2000:]}")
+        shutil.move(str(Path(build) / pdf.name), pdf)
     return pdf
 
 
@@ -216,16 +228,16 @@ def main() -> int:
     metrics = cached_metrics() if args.no_run else measure()
     print("métricas:", metrics)
 
-    html_text = build_html(values, metrics)
-    leftovers = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", html_text)))
+    tex_text = build_tex(values, metrics)
+    leftovers = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", tex_text)))
     if leftovers:
         print("marcadores sem valor:", ", ".join(leftovers))
         if args.final:
             print("FALHOU: preencha docs/entrega.json (modelo em docs/entrega.exemplo.json)")
             return 1
-    html_path = DIST / "relatorio.html"
-    html_path.write_text(html_text, encoding="utf-8")
-    pdf = to_pdf(html_path)
+    tex_path = DIST / "relatorio.tex"
+    tex_path.write_text(tex_text, encoding="utf-8")
+    pdf = to_pdf(tex_path)
 
     tag = str(data.get("grupo") or "X")
     final_pdf = DIST / f"grupo-{tag}-relatorio.pdf"
