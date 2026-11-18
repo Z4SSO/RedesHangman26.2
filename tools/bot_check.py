@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Interoperabilidade (cenário 11): o nosso cliente como JOGADOR contra o bot oficial.
 
     python tools/bot_check.py win [N]     # N jogadores (padrão 2) que acham a palavra e vencem

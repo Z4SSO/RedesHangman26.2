@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Valida o envelope e despacha cada mensagem recebida pelo `type`.
 
 Dono: Pessoa C. Issue 03.2. Logger: "Router".

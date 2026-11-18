@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Testes da issue 01.7: P2PClient (início, tarefas periódicas, encerramento).
 
 O Rendezvous é um servidor falso COM ESTADO em 127.0.0.1 (porta 0): guarda os

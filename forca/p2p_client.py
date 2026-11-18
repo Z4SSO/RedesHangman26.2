@@ -1,3 +1,5 @@
+# Trabalho de Programação — PyP2P-Forca (CIC0124 Redes de Computadores, 2026/2)
+# Grupo 2: Luís Felipe de Lima Benvegnú (251004330) e Caio Bonini Sampaio (251004287)
 """Orquestra tudo: registro, tarefas periódicas, encerramento limpo.
 
 Dono: Pessoa A (ciclo de vida) com Pessoa C (ligação dos handlers). Issue 01.7.
