@@ -1,12 +1,12 @@
 # Testes e evidências
 
-Gerado em 17/11/2026 sobre o commit `f9a25ab` (branch `feat/04-integracao`). A saída abaixo é a **saída literal** dos scripts; para reproduzir, veja a seção seguinte.
+Gerado em 17/11/2026 sobre o commit `f9a25ab` (branch `feat/04-integracao`). A contagem de testes foi atualizada em 18/11/2026 (368, após o bônus de chat); a saída abaixo é a **saída literal** dos scripts; para reproduzir, veja a seção seguinte.
 
 ## Como reproduzir
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
-python -m pytest -q                    # 356 testes (unitários e de rede em 127.0.0.1)
+python -m pytest -q                    # 368 testes (unitários e de rede em 127.0.0.1)
 python tools/scenarios.py              # cenários 1 a 10, processos reais, ~25 s; --list / --only 7a,8
 python tools/bot_check.py all          # cenário 11 contra o bot oficial; precisa de internet, ~5 min
 ```
